@@ -1,0 +1,78 @@
+# 项目层规则 · ScreenDeck（Electron + Node.js）
+# 安装位置：D:\DSH\ScreenDeck\.dsh\rules.yaml
+# 只写 deny，不写 allow；顺序即优先级，第一条命中生效。
+# schema 硬约束：顶层只有 rules；每条只有 match/action/reason/enabled/description/tags；
+# match 只有 tools/agents/params/paths/absent/when/network；禁止 id/priority/argv。
+
+rules:
+  # ══ 基线段开始（由 tools\sync-baseline.py 维护，勿手改）══════════════════
+  - match:
+      paths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/*.htpasswd']
+    action: deny
+    reason: "禁止访问凭据/密钥文件"
+
+  - match:
+      tools: [bash, pwsh]
+      params:
+        command: ['*push --force*', '*reset --hard*', '*clean -fd*']
+    action: deny
+    reason: "禁止破坏性 git 操作"
+
+  - match:
+      tools: [bash, pwsh]
+      params:
+        command: ['*DROP TABLE*', '*DROP COLUMN*', '*RENAME TABLE*']
+    action: deny
+    reason: "数据库只允许 CREATE / ADD COLUMN"
+
+  - match:
+      tools: [write, edit, apply_patch]
+      paths: ['**/.ssh/**', '**/.aws/**', '**/.gnupg/**']
+    action: deny
+    reason: "禁止写入系统凭据目录"
+  # ══ 基线段结束 ═══════════════════════════════════════════════════════
+
+  # ↓↓↓ ScreenDeck 项目特有 ↓↓↓
+
+  # 锁文件交给包管理器生成，手改会破坏依赖树一致性
+  - match:
+      tools: [write, edit, apply_patch]
+      paths: ['**/package-lock.json', '**/pnpm-lock.yaml', '**/yarn.lock']
+    action: deny
+    reason: "锁文件由包管理器生成，禁止手改；要升级依赖就改 package.json"
+
+  # 仓库元数据与 CI
+  - match:
+      tools: [write, edit, apply_patch]
+      paths: ['**/.git/**', '**/.github/workflows/**']
+    action: deny
+    reason: "仓库元数据与 CI 配置需人工确认后修改"
+
+  # Electron 打包配置：改动影响分发，需人工评审
+  - match:
+      tools: [write, edit, apply_patch]
+      paths: ['**/electron-builder.*', '**/forge.config.*']
+    action: deny
+    reason: "Electron 打包配置改动需人工评审"
+
+  # ── 按项目阶段补充（取消注释即生效）────────────────────────────
+  # .npmrc：agent 创建后，人工确认内容为 nodeLinker=hoisted，再取消注释
+  # - match:
+  #     tools: [write, edit, apply_patch]
+  #     paths: ['**/.npmrc']
+  #   action: deny
+  #   reason: ".npmrc 的 nodeLinker=hoisted 是项目硬约束，改动会导致 pnpm 创建链接"
+
+  # package.json：依赖稳定后，锁定版本时启用
+  # - match:
+  #     tools: [write, edit, apply_patch]
+  #     paths: ['**/package.json']
+  #   action: deny
+  #   reason: "package.json 依赖改动需人工确认版本"
+
+  # 核心架构文件：模块 1 完成后、架构稳定时启用
+  # - match:
+  #     tools: [write, edit, apply_patch]
+  #     paths: ['**/main.js', '**/preload.js']
+  #   action: deny
+  #   reason: "主进程和 preload 是安全边界，改动需人工评审"

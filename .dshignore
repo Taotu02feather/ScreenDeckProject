@@ -1,0 +1,25 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+build/
+out/
+release/
+dist_electron/
+.vite/
+.electron/
+coverage/
+.turbo/
+.cache/
+
+# 日志
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Windows 开发环境
+Thumbs.db
+*.local
