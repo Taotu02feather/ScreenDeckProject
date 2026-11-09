@@ -1,0 +1,43 @@
+'use strict';
+
+/**
+ * 控制台窗口的 preload。
+ * 只暴露白名单方法；渲染层拿不到 ipcRenderer，也拿不到 require。
+ */
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+function onState(callback) {
+  const listener = (_event, snapshot) => callback(snapshot);
+  ipcRenderer.on('state:event', listener);
+  return () => ipcRenderer.removeListener('state:event', listener);
+}
+
+contextBridge.exposeInMainWorld('screenDeck', {
+  // 共享状态
+  getState: () => ipcRenderer.invoke('state:get'),
+  patch: (partial) => ipcRenderer.invoke('state:patch', partial),
+  onState,
+
+  // 内部内容源
+  loadDocument: (id) => ipcRenderer.invoke('doc:load', id),
+  listDocuments: () => ipcRenderer.invoke('docs:list'),
+  openDocuments: () => ipcRenderer.invoke('docs:open'),
+  selectDocument: (id) => ipcRenderer.invoke('docs:select', id),
+  removeDocument: (id) => ipcRenderer.invoke('docs:remove', id),
+
+  // 外部窗口源
+  listWindows: () => ipcRenderer.invoke('windows:list'),
+  selectWindow: (payload) => ipcRenderer.invoke('windows:select', payload),
+
+  // 显示器 / 布局 / 偏好
+  listDisplays: () => ipcRenderer.invoke('display:list'),
+  getLayout: () => ipcRenderer.invoke('layout:get'),
+  setLayout: (partial) => ipcRenderer.invoke('layout:set', partial),
+  getPrefs: () => ipcRenderer.invoke('prefs:get'),
+  setPrefs: (partial) => ipcRenderer.invoke('prefs:set', partial),
+
+  // 输出窗口控制
+  toggleOutput: () => ipcRenderer.invoke('output:toggle'),
+  quit: () => ipcRenderer.invoke('app:quit'),
+});

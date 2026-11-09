@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; media-src 'self' blob: file:; font-src 'self' data: file:; connect-src 'self' blob: file:; worker-src 'self' blob: file:;"
+    />
+    <title>ScreenDeck 输出</title>
+    <link rel="stylesheet" href="output.css" />
+  </head>
+  <body>
+    <!-- TODO: 明天重点排查 —— 同 console.html：若这块提示没消失，说明脚本被 CSP 挡住 -->
+    <div id="boot-fallback" class="boot-fallback">
+      渲染脚本未加载（多半是 CSP 或文件路径问题）—— 请查看终端输出。
+    </div>
+
+    <div id="viewer" class="output-viewer"></div>
+    <div id="laser" class="laser" aria-hidden="true"></div>
+    <div id="hint" class="output-hint">ScreenDeck · 等待内容源</div>
+
+    <script src="../../../node_modules/pdfjs-dist/build/pdf.min.js"></script>
+    <script src="../../../node_modules/marked/marked.min.js"></script>
+    <script src="../common/viewer.js"></script>
+    <script src="output.js"></script>
+  </body>
+</html>

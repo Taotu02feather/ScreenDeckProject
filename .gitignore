@@ -1,0 +1,48 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+dist_electron/
+build/
+out/
+release/
+.vite/
+.electron/
+*.asar
+
+# 缓存与日志
+.npm/
+npm-debug.log*
+*.log
+*.tsbuildinfo
+.cache/
+
+# 本地配置 / 环境
+.env
+.env.*
+!.env.example
+*.local
+
+# 编辑器与系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+Desktop.ini
+*.swp
+
+# 测试与覆盖
+coverage/
+.nyc_output/
+
+# 本项目运行时产生的临时文件
+*.tmp
+screendeck-state.json
+
+# 安装过程落在工作区内的缓存（避免写 C 盘）
+.npm-cache/
+.electron-cache/
+
+# 本地 Electron 运行时副本（测试用，绝不入库）
+edtest/

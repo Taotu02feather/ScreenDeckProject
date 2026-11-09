@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; media-src 'self' blob: file:; font-src 'self' data: file:; connect-src 'self' blob: file:; worker-src 'self' blob: file:;"
+    />
+    <title>ScreenDeck 控制台</title>
+    <link rel="stylesheet" href="console.css" />
+  </head>
+  <body>
+    <!--
+      TODO: 明天重点排查 —— file:// 页面下 CSP 里的 'self' 可能不匹配任何来源，
+      真正生效的是显式列出的 file:。若页面白屏且这行字没被移除，就是脚本被 CSP 挡了。
+      兜底提示见 #boot-fallback（脚本成功执行后会被删掉）。
+    -->
+    <div id="boot-fallback" class="boot-fallback">
+      渲染脚本未加载（多半是 CSP 或文件路径问题）—— 请把终端报错发给我。
+    </div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">◧</span>
+        <span class="brand-name">ScreenDeck</span>
+      </div>
+      <div class="displays" id="displays"></div>
+      <div class="spacer"></div>
+      <button type="button" class="ghost" id="btn-toggle-output">隐藏大屏</button>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" data-tab="docs" role="tab">文档</button>
+          <button type="button" class="tab" data-tab="windows" role="tab">窗口</button>
+        </div>
+
+        <div class="tab-panel" id="panel-docs">
+          <button type="button" class="wide primary" id="btn-open-docs">打开文档…</button>
+          <ul class="source-list" id="doc-list"></ul>
+        </div>
+
+        <div class="tab-panel hidden" id="panel-windows">
+          <button type="button" class="wide" id="btn-refresh-windows">刷新窗口列表</button>
+          <ul class="source-list window-list" id="window-list"></ul>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="summary-label">当前内容源</div>
+          <div class="summary-value" id="source-summary">未选择</div>
+        </div>
+      </aside>
+
+      <main class="stage" id="stage">
+        <div class="stage-hint" id="stage-hint">
+          演讲者工作区 · 拖动映射窗标题栏移动，拖边缘缩放，双击标题栏最大化
+        </div>
+
+        <section class="mirror" id="mirror">
+          <div class="mirror-header" id="mirror-header">
+            <span class="mirror-title" id="mirror-title">映射窗</span>
+            <span class="mirror-status" id="mirror-status">—</span>
+          </div>
+          <div class="mirror-body" id="mirror-body"></div>
+          <div class="resize-handle handle-n" data-dir="n"></div>
+          <div class="resize-handle handle-s" data-dir="s"></div>
+          <div class="resize-handle handle-e" data-dir="e"></div>
+          <div class="resize-handle handle-w" data-dir="w"></div>
+          <div class="resize-handle handle-ne" data-dir="ne"></div>
+          <div class="resize-handle handle-nw" data-dir="nw"></div>
+          <div class="resize-handle handle-se" data-dir="se"></div>
+          <div class="resize-handle handle-sw" data-dir="sw"></div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar">
+      <span id="status-source">内容源：无</span>
+      <span class="divider">·</span>
+      <span id="status-page">页 —</span>
+      <span class="divider">·</span>
+      <span id="status-zoom">缩放 100%</span>
+      <div class="spacer"></div>
+      <span class="hint-keys">拖动=滚动 / 横拖=翻页 / 滚轮=滚动 / Ctrl+滚轮=缩放映射窗 / 单击=激光点</span>
+    </footer>
+
+    <script src="../../../node_modules/pdfjs-dist/build/pdf.min.js"></script>
+    <script src="../../../node_modules/marked/marked.min.js"></script>
+    <script src="../common/viewer.js"></script>
+    <script src="console.js"></script>
+  </body>
+</html>

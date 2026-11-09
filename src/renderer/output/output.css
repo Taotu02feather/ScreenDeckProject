@@ -1,0 +1,212 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  cursor: none;
+}
+
+.output-viewer {
+  position: absolute;
+  inset: 0;
+}
+
+.boot-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  background: #000;
+  color: #ff9a9a;
+  font-size: 16px;
+  cursor: default;
+}
+
+/* ── 共享渲染器基础样式 ───────────────────────────────── */
+.sd-viewer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.sd-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.sd-page {
+  will-change: transform;
+  transform: translateY(0);
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.sd-canvas {
+  display: block;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.sd-markdown {
+  width: min(100%, 1080px);
+  padding: 48px 56px 96px;
+  background: #101216;
+  color: #e8ecf3;
+  line-height: 1.72;
+  font-size: 22px;
+  will-change: transform;
+  transform: translateY(0);
+}
+
+.sd-markdown h1,
+.sd-markdown h2,
+.sd-markdown h3 {
+  color: #fff;
+  line-height: 1.3;
+  margin: 1.4em 0 0.6em;
+}
+
+.sd-markdown h1 {
+  font-size: 2.1em;
+}
+
+.sd-markdown h2 {
+  font-size: 1.6em;
+}
+
+.sd-markdown h3 {
+  font-size: 1.28em;
+}
+
+.sd-markdown code {
+  background: #1d222b;
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.sd-markdown pre {
+  background: #151a21;
+  padding: 16px 18px;
+  border-radius: 8px;
+  overflow: auto;
+  border: 1px solid #232a35;
+}
+
+.sd-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.sd-markdown blockquote {
+  margin: 1em 0;
+  padding: 0.2em 1em;
+  border-left: 4px solid #3b82f6;
+  color: #b9c3d1;
+}
+
+.sd-markdown table {
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.sd-markdown th,
+.sd-markdown td {
+  border: 1px solid #2b333f;
+  padding: 8px 12px;
+}
+
+.sd-markdown img {
+  max-width: 100%;
+}
+
+.sd-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: none;
+}
+
+.sd-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  transform-origin: center center;
+}
+
+.sd-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #4b5563;
+}
+
+.sd-placeholder-title {
+  font-size: 18px;
+  color: #6b7280;
+}
+
+.sd-placeholder-hint {
+  font-size: 13px;
+  color: #374151;
+}
+
+/* ── 激光点 ───────────────────────────────────────────── */
+.laser {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 120ms ease, transform 120ms ease;
+  background: radial-gradient(circle, rgba(255, 64, 64, 0.95) 0%, rgba(255, 64, 64, 0.55) 42%, rgba(255, 64, 64, 0) 72%);
+  box-shadow: 0 0 26px 8px rgba(255, 48, 48, 0.45);
+}
+
+.laser.on {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.output-hint {
+  position: absolute;
+  left: 16px;
+  bottom: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+}
+
+.output-hint.hidden {
+  display: none;
+}

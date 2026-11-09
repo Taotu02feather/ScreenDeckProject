@@ -1,0 +1,26 @@
+{
+  "name": "screendeck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ScreenDeck - 跨屏演示控制台：本地自由工作区 + 干净的大屏输出",
+  "main": "src/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node scripts/launcher.js",
+    "dev": "node scripts/launcher.js --dev",
+    "start:direct": "electron .",
+    "dev:direct": "electron . --dev",
+    "check": "node scripts/check-syntax.js",
+    "test": "node scripts/smoke.js",
+    "preflight": "node scripts/preflight.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "marked": "^4.3.0",
+    "pdfjs-dist": "3.11.174"
+  }
+}
