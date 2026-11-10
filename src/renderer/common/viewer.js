@@ -132,7 +132,8 @@
         const state = this.pending;
         this.pending = null;
         const source = state.source || {};
-        const key = [source.type, source.id || '', source.windowId || '', source.kind || ''].join('|');
+        // captureNonce 变化时强制重建（用于捕获画面异常时重连）
+        const key = [source.type, source.id || '', source.windowId || '', source.kind || '', state.captureNonce || 0].join('|');
         if (key !== this.docKey) {
           this.docKey = key;
           await this.mount(source);
@@ -398,8 +399,9 @@
 
     paintStream(state) {
       if (!this.videoEl) return;
-      // 只读镜像：不做任何滚动/翻页变换
-      const zoom = clamp(state.zoom || 1, ZOOM_MIN, ZOOM_MAX) * this.localZoom;
+      // 外部窗口只跟随共享缩放，不叠加映射窗的本地缩放：
+      // 否则映射窗和实时大屏的取景会不一致，点击换算也会错位。
+      const zoom = clamp(state.zoom || 1, ZOOM_MIN, ZOOM_MAX);
       this.videoEl.style.transform = `scale(${zoom.toFixed(3)})`;
     }
 

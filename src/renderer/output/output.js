@@ -25,6 +25,26 @@
 
   const viewer = new window.Viewer(viewerRoot);
 
+  // 上报真实视口，映射窗据此保持同一宽高比（避免"大屏画面偏上一点"这类差异）
+  function reportViewport() {
+    try {
+      window.screenDeck.reportViewport({ width: window.innerWidth, height: window.innerHeight });
+    } catch {
+      // 忽略
+    }
+  }
+  reportViewport();
+  window.addEventListener('resize', reportViewport);
+
+  // 退出时主动停止捕获流，避免强退后残留 GPU/捕获资源
+  window.addEventListener('beforeunload', () => {
+    try {
+      viewer.destroy();
+    } catch {
+      // 忽略
+    }
+  });
+
   function paintLaser(state) {
     const laser = state.laser || {};
     if (!laser.visible) {

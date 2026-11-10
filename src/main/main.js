@@ -18,6 +18,12 @@ registerScheme();
 
 const isDev = process.argv.includes('--dev');
 
+// 默认保留硬件加速：视频（窗口捕获流）在软件路径下会渲染成整块绿色。
+// 只有在排查 GPU 相关问题时才用 SCREENDECK_NO_GPU=1 关闭。
+if (process.env.SCREENDECK_NO_GPU === '1') {
+  app.disableHardwareAcceleration();
+}
+
 // 启动日志：静默崩溃是排查黑洞，所以每一步都落盘 + 打到 stdout。
 // 位置：%TEMP%\screendeck-boot.log（用户终端里 echo $env:TEMP 可见）
 const LOG_FILE = path.join(os.tmpdir(), 'screendeck-boot.log');
@@ -111,6 +117,12 @@ function boot() {
     }
     try {
       if (injectorRef) injectorRef.stop();
+    } catch {
+      // 忽略
+    }
+    try {
+      // 主动销毁窗口：让捕获流与 GPU 资源尽早释放，避免强退后桌面残留痕迹
+      if (wm) wm.shutdown();
     } catch {
       // 忽略
     }

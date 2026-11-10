@@ -47,6 +47,7 @@ class WindowManager {
     this.output = null;
     /** 当前选中的外部窗口捕获源 id（desktopCapturer source id） */
     this.captureWindowId = null;
+    this.outputViewport = null;
     this._onStateChanged = (snapshot) => this.broadcast('state:event', snapshot);
   }
 
@@ -317,12 +318,37 @@ class WindowManager {
 
   /** 大屏内容区尺寸，映射窗按这个宽高比布局，保证两边取景一致。 */
   outputSize() {
+    // 优先用输出窗口自己上报的视口尺寸（CSS 像素，最准确）
+    if (this.outputViewport && this.outputViewport.width > 0 && this.outputViewport.height > 0) {
+      return { ...this.outputViewport };
+    }
     if (this.output && !this.output.isDestroyed()) {
       const bounds =
         typeof this.output.getContentBounds === 'function' ? this.output.getContentBounds() : this.output.getBounds();
       return { width: Math.round(bounds.width), height: Math.round(bounds.height) };
     }
     return { width: 1280, height: 720 };
+  }
+
+  /** 输出窗口渲染完成后上报的真实视口尺寸。 */
+  setOutputViewport(size) {
+    if (!size || !(size.width > 0) || !(size.height > 0)) return;
+    const next = { width: Math.round(size.width), height: Math.round(size.height) };
+    this.outputViewport = next;
+    this.broadcast('viewport:changed', next);
+  }
+
+  /** 退出前主动销毁窗口，让捕获流和 GPU 资源尽早释放。 */
+  shutdown() {
+    for (const win of [this.output, this.console]) {
+      try {
+        if (win && !win.isDestroyed()) win.destroy();
+      } catch {
+        // 忽略
+      }
+    }
+    this.output = null;
+    this.console = null;
   }
 
   displayInfo() {    const { displays, primary, secondary } = this.plan();

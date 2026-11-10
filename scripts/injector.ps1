@@ -1,16 +1,22 @@
-# ScreenDeck 事件注入器（常驻进程）
+﻿# ScreenDeck event injector (resident helper)
 #
-# 由主进程以子进程方式启动，通过 stdin 逐行接收命令，stdout 逐行返回结果。
-# 只用 Windows 自带的 user32.dll（P/Invoke），不引入任何 npm 原生模块。
+# Spawned by the Electron main process. Commands arrive on stdin, one per line,
+# results are written to stdout, one per line. Uses only user32.dll from Windows;
+# no npm native module is involved.
 #
-# 命令：
-#   rect <hwnd>                    -> OK rect <left> <top> <width> <height>
-#   click <hwnd> <x> <y>           -> OK click
-#   wheel <hwnd> <x> <y> <delta>   -> OK wheel
-#   alive <hwnd>                   -> OK alive 0|1
-#   quit                           -> OK bye
+# Design: every P/Invoke and struct operation lives in C# static methods.
+# PowerShell only parses the command line and prints a string. This avoids the
+# two traps we already hit:
+#   1. assigning fields of a .NET struct from PowerShell fails ("property X not found")
+#   2. Chinese comments inside Add-Type source get written as ANSI and can swallow
+#      the next line, so the C# here must stay ASCII-only.
 #
-# 坐标 <x> <y> 都是「客户区坐标」，由主进程按归一化位置换算。
+# Protocol:
+#   rect  <hwnd>                  -> OK rect <left> <top> <width> <height>
+#   click <hwnd> <x> <y>          -> OK click
+#   wheel <hwnd> <x> <y> <delta>  -> OK wheel
+#   alive <hwnd>                  -> OK alive 0|1
+#   quit                          -> OK bye
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -18,84 +24,187 @@ $ProgressPreference = 'SilentlyContinue'
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 public static class ScreenDeckNative
 {
     [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct POINT { public int X; public int Y; }
+    private struct POINT { public int X; public int Y; }
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+    private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool IsWindow(IntPtr hWnd);
+    private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    public static extern IntPtr WindowFromPoint(POINT p);
+    private static extern IntPtr WindowFromPoint(POINT p);
 
     [DllImport("user32.dll")]
-    public static extern bool ScreenToClient(IntPtr hWnd, ref POINT p);
+    private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
 
     [DllImport("user32.dll")]
-    public static extern bool SetProcessDPIAware();
+    private static extern bool SetProcessDPIAware();
 
-    public const uint WM_MOUSEMOVE   = 0x0200;
-    public const uint WM_LBUTTONDOWN = 0x0201;
-    public const uint WM_LBUTTONUP   = 0x0202;
-    public const uint WM_MOUSEWHEEL  = 0x020A;
-    public const uint MK_LBUTTON     = 0x0001;
+    private const uint WM_MOUSEMOVE   = 0x0200;
+    private const uint WM_LBUTTONDOWN = 0x0201;
+    private const uint WM_LBUTTONUP   = 0x0202;
+    private const uint WM_MOUSEWHEEL  = 0x020A;
+    private const int  MK_LBUTTON     = 0x0001;
+    private const uint GA_ROOT        = 2;
 
-    public static IntPtr MakeLParam(int x, int y)
+    static ScreenDeckNative()
+    {
+        try { SetProcessDPIAware(); } catch { }
+    }
+
+    public static bool Alive(IntPtr hwnd)
+    {
+        try { return IsWindow(hwnd); } catch { return false; }
+    }
+
+    // returns "left,top,width,height", or null on failure
+    public static string ClientRect(IntPtr hwnd)
+    {
+        try
+        {
+            RECT r;
+            if (!GetClientRect(hwnd, out r)) return null;
+            POINT origin = new POINT();
+            origin.X = 0;
+            origin.Y = 0;
+            if (!ClientToScreen(hwnd, ref origin)) return null;
+            return origin.X + "," + origin.Y + "," + (r.Right - r.Left) + "," + (r.Bottom - r.Top);
+        }
+        catch { return null; }
+    }
+
+    // The hit window must share the same top-level window as the target;
+    // otherwise something else covers the point (for example our own full-screen
+    // output window), and we fall back to the target instead of injecting into
+    // ourselves.
+    private static IntPtr ResolveTarget(IntPtr hwnd, POINT screen)
+    {
+        IntPtr hit = WindowFromPoint(screen);
+        if (hit == IntPtr.Zero) return hwnd;
+        if (GetAncestor(hit, GA_ROOT) != GetAncestor(hwnd, GA_ROOT)) return hwnd;
+        return hit;
+    }
+
+    private static IntPtr MakeLParam(int x, int y)
     {
         return (IntPtr)((y << 16) | (x & 0xFFFF));
     }
+
+    public static int Click(IntPtr hwnd, int x, int y)
+    {
+        try
+        {
+            RECT r;
+            if (!GetClientRect(hwnd, out r)) return 1;
+            int cw = r.Right - r.Left;
+            int ch = r.Bottom - r.Top;
+            if (cw <= 0 || ch <= 0) return 2;
+
+            POINT origin = new POINT();
+            origin.X = 0;
+            origin.Y = 0;
+            if (!ClientToScreen(hwnd, ref origin)) return 3;
+
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return 4;
+
+            POINT screen = new POINT();
+            screen.X = origin.X + x;
+            screen.Y = origin.Y + y;
+
+            IntPtr target = ResolveTarget(hwnd, screen);
+
+            POINT local = new POINT();
+            local.X = screen.X;
+            local.Y = screen.Y;
+            ScreenToClient(target, ref local);
+
+            IntPtr lp = MakeLParam(local.X, local.Y);
+            PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, lp);
+            PostMessage(target, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, lp);
+            Thread.Sleep(15);
+            PostMessage(target, WM_LBUTTONUP, IntPtr.Zero, lp);
+            return 0;
+        }
+        catch { return 99; }
+    }
+
+    public static int Wheel(IntPtr hwnd, int x, int y, int delta)
+    {
+        try
+        {
+            RECT r;
+            if (!GetClientRect(hwnd, out r)) return 1;
+            int cw = r.Right - r.Left;
+            int ch = r.Bottom - r.Top;
+            if (cw <= 0 || ch <= 0) return 2;
+
+            POINT origin = new POINT();
+            origin.X = 0;
+            origin.Y = 0;
+            if (!ClientToScreen(hwnd, ref origin)) return 3;
+
+            if (x < 0 || x >= cw) x = cw / 2;
+            if (y < 0 || y >= ch) y = ch / 2;
+
+            POINT screen = new POINT();
+            screen.X = origin.X + x;
+            screen.Y = origin.Y + y;
+
+            IntPtr target = ResolveTarget(hwnd, screen);
+            IntPtr root = GetAncestor(hwnd, GA_ROOT);
+
+            // Wheel needs SCREEN coordinates in lParam and the delta in the high word of wParam.
+            IntPtr lp = MakeLParam(screen.X, screen.Y);
+            IntPtr wParam = (IntPtr)((delta & 0xFFFF) << 16);
+
+            // Some applications (Chromium based ones in particular) only handle the
+            // wheel message on the focused child window, others handle it on the
+            // top-level window. Post to both: harmless when the extra one is ignored.
+            PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, MakeLParam(x, y));
+            PostMessage(target, WM_MOUSEWHEEL, wParam, lp);
+            if (root != IntPtr.Zero && root != target)
+            {
+                PostMessage(root, WM_MOUSEWHEEL, wParam, lp);
+            }
+            return 0;
+        }
+        catch { return 99; }
+    }
 }
 '@
-
-try { [ScreenDeckNative]::SetProcessDPIAware() | Out-Null } catch { }
 
 function Write-Result([string]$text) {
     [Console]::Out.WriteLine($text)
     [Console]::Out.Flush()
 }
 
-function Get-ClientOrigin([IntPtr]$hwnd) {
-    $rect = New-Object ScreenDeckNative+RECT
-    if (-not [ScreenDeckNative]::GetClientRect($hwnd, [ref]$rect)) { return $null }
-
-    $origin = New-Object ScreenDeckNative+POINT
-    $origin.X = 0
-    $origin.Y = 0
-    if (-not [ScreenDeckNative]::ClientToScreen($hwnd, [ref]$origin)) { return $null }
-
-    return @{
-        Left = $origin.X
-        Top = $origin.Y
-        Width = $rect.Right - $rect.Left
-        Height = $rect.Bottom - $rect.Top
+function Get-CodeText([int]$code) {
+    switch ($code) {
+        0 { 'ok' }
+        1 { 'no-window' }
+        2 { 'empty-window' }
+        3 { 'client-to-screen-failed' }
+        4 { 'out-of-range' }
+        default { "error-$code" }
     }
-}
-
-function Resolve-InjectTarget([IntPtr]$hwnd, $screenPoint) {
-    $hit = [ScreenDeckNative]::WindowFromPoint($screenPoint)
-    if ($hit -eq [IntPtr]::Zero) { return $hwnd }
-
-    # 只有命中的窗口和目标窗口属于同一顶层窗口时才用它；
-    # 否则说明鼠标点被别的窗口挡住（例如我们自己盖在副屏上的全屏大屏窗口），
-    # 这时退回原始目标窗口，避免把点击注入到自己身上。
-    $hitRoot = [ScreenDeckNative]::GetAncestor($hit, [ScreenDeckNative]::GA_ROOT)
-    $targetRoot = [ScreenDeckNative]::GetAncestor($hwnd, [ScreenDeckNative]::GA_ROOT)
-    if ($hitRoot -ne $targetRoot) { return $hwnd }
-    return $hit
 }
 
 Write-Result 'OK ready'
@@ -117,68 +226,26 @@ while ($true) {
             }
             'alive' {
                 $hwnd = [IntPtr][Int64]$parts[1]
-                $ok = [ScreenDeckNative]::IsWindow($hwnd)
+                $ok = [ScreenDeckNative]::Alive($hwnd)
                 Write-Result ("OK alive {0}" -f ($(if ($ok) { 1 } else { 0 })))
             }
             'rect' {
                 $hwnd = [IntPtr][Int64]$parts[1]
-                $info = Get-ClientOrigin $hwnd
-                if ($null -eq $info) { Write-Result 'ERR rect'; break }
-                Write-Result ("OK rect {0} {1} {2} {3}" -f $info.Left, $info.Top, $info.Width, $info.Height)
+                $result = [ScreenDeckNative]::ClientRect($hwnd)
+                if ($null -eq $result) { Write-Result 'ERR rect' }
+                else { Write-Result ("OK rect {0}" -f ($result -replace ',', ' ')) }
             }
             'click' {
                 $hwnd = [IntPtr][Int64]$parts[1]
-                $x = [int]$parts[2]
-                $y = [int]$parts[3]
-
-                $origin = Get-ClientOrigin $hwnd
-                if ($null -eq $origin) { Write-Result 'ERR no-window'; break }
-                if ($origin.Width -le 0 -or $origin.Height -le 0) { Write-Result 'ERR empty-window'; break }
-                if ($x -lt 0 -or $y -lt 0 -or $x -ge $origin.Width -or $y -ge $origin.Height) {
-                    Write-Result 'ERR out-of-range'
-                    break
-                }
-
-                # 找到屏幕坐标下最深的那一层窗口：VS Code / 浏览器把界面画在子窗口里，
-                # 消息投给顶层窗口往往被忽略，必须投给命中点所在的子窗口。
-                $screenPoint = New-Object ScreenDeckNative+POINT
-                $screenPoint.X = $origin.Left + $x
-                $screenPoint.Y = $origin.Top + $y
-
-                $target = Resolve-InjectTarget $hwnd $screenPoint
-
-                $local = New-Object ScreenDeckNative+POINT
-                $local.X = $screenPoint.X
-                $local.Y = $screenPoint.Y
-                [void][ScreenDeckNative]::ScreenToClient($target, [ref]$local)
-
-                $lp = [ScreenDeckNative]::MakeLParam($local.X, $local.Y)
-                [ScreenDeckNative]::PostMessage($target, [ScreenDeckNative]::WM_MOUSEMOVE, [IntPtr]::Zero, $lp) | Out-Null
-                [ScreenDeckNative]::PostMessage($target, [ScreenDeckNative]::WM_LBUTTONDOWN, [IntPtr][ScreenDeckNative]::MK_LBUTTON, $lp) | Out-Null
-                Start-Sleep -Milliseconds 12
-                [ScreenDeckNative]::PostMessage($target, [ScreenDeckNative]::WM_LBUTTONUP, [IntPtr]::Zero, $lp) | Out-Null
-                Write-Result 'OK click'
+                $code = [ScreenDeckNative]::Click($hwnd, [int]$parts[2], [int]$parts[3])
+                if ($code -eq 0) { Write-Result 'OK click' }
+                else { Write-Result ("ERR {0}" -f (Get-CodeText $code)) }
             }
             'wheel' {
                 $hwnd = [IntPtr][Int64]$parts[1]
-                $x = [int]$parts[2]
-                $y = [int]$parts[3]
-                $delta = [int]$parts[4]
-
-                $origin = Get-ClientOrigin $hwnd
-                if ($null -eq $origin) { Write-Result 'ERR no-window'; break }
-
-                $screenPoint = New-Object ScreenDeckNative+POINT
-                $screenPoint.X = $origin.Left + $x
-                $screenPoint.Y = $origin.Top + $y
-
-                $target = Resolve-InjectTarget $hwnd $screenPoint
-
-                # WM_MOUSEWHEEL 的 lParam 必须是屏幕坐标
-                $lp = [ScreenDeckNative]::MakeLParam($screenPoint.X, $screenPoint.Y)
-                $wParam = [IntPtr](($delta -band 0xFFFF) -shl 16)
-                [ScreenDeckNative]::PostMessage($target, [ScreenDeckNative]::WM_MOUSEWHEEL, $wParam, $lp) | Out-Null
-                Write-Result 'OK wheel'
+                $code = [ScreenDeckNative]::Wheel($hwnd, [int]$parts[2], [int]$parts[3], [int]$parts[4])
+                if ($code -eq 0) { Write-Result 'OK wheel' }
+                else { Write-Result ("ERR {0}" -f (Get-CodeText $code)) }
             }
             default {
                 Write-Result ("ERR unknown {0}" -f $cmd)

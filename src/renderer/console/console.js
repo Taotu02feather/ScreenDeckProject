@@ -21,6 +21,7 @@
     btnPrevPage: document.getElementById('btn-prev-page'),
     btnNextPage: document.getElementById('btn-next-page'),
     btnFit: document.getElementById('btn-fit'),
+    btnReconnect: document.getElementById('btn-reconnect'),
     chkInject: document.getElementById('chk-inject'),
     mirrorTitle: document.getElementById('mirror-title'),
     mirrorStatus: document.getElementById('mirror-status'),
@@ -518,17 +519,21 @@
   /** 外部窗口画面在映射窗里是 object-fit: contain，算出实际内容区域，再把指针位置归一化。 */
   function videoPointFromEvent(event) {
     const video = dom.mirrorViewer ? dom.mirrorViewer.querySelector('.sd-video') : null;
-    const rect = dom.mirrorScreen.getBoundingClientRect();
-    if (!video || !video.videoWidth || rect.width <= 0 || rect.height <= 0) return null;
+    if (!video || !video.videoWidth || !video.videoHeight) return null;
+
+    // 用元素自身的 rect（已包含 CSS transform 缩放），而不是容器的 rect，
+    // 否则画面被缩放过之后点击位置就会整体偏移。
+    const rect = video.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
 
     const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
     const contentWidth = video.videoWidth * scale;
     const contentHeight = video.videoHeight * scale;
-    const offsetX = (rect.width - contentWidth) / 2;
-    const offsetY = (rect.height - contentHeight) / 2;
+    const offsetX = rect.left + (rect.width - contentWidth) / 2;
+    const offsetY = rect.top + (rect.height - contentHeight) / 2;
 
-    const nx = (event.clientX - rect.left - offsetX) / contentWidth;
-    const ny = (event.clientY - rect.top - offsetY) / contentHeight;
+    const nx = (event.clientX - offsetX) / contentWidth;
+    const ny = (event.clientY - offsetY) / contentHeight;
     if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
     return { nx, ny };
   }
@@ -572,7 +577,8 @@
         }
         return;
       }
-      scrollWithPageTransition(contentDrag.startScroll - dy / range);
+      // 阻尼系数：1.0 是完全跟手，页面高时手感偏"窜"，0.6 更接近演示翻页的节奏
+      scrollWithPageTransition(contentDrag.startScroll - (dy * 0.6) / range);
       return;
     }
 
@@ -642,7 +648,7 @@
     }
 
     const base = state ? state.scroll : 0;
-    scrollWithPageTransition(base + event.deltaY / 900);
+    scrollWithPageTransition(base + event.deltaY / 1500);
   }, { passive: false });
 
   // ── 快捷键 ───────────────────────────────────────────────
@@ -683,7 +689,16 @@
         if (state) viewer.apply(state).catch(() => {});
         break;
       case 'Escape':
-        queuePatch({ laser: { visible: false } });
+        // 注入开启时，Esc 是紧急停止开关（比收起激光点更重要）
+        if (injectEnabled) {
+          injectEnabled = false;
+          dom.chkInject.checked = false;
+          sd.injectDisable().catch(() => {});
+          if (state) updateStatus(state);
+          dom.mirrorStatus.textContent = '注入已停止';
+        } else {
+          queuePatch({ laser: { visible: false } });
+        }
         break;
       default:
         break;
@@ -731,8 +746,16 @@
 
   dom.chkInject.addEventListener('change', () => {
     injectEnabled = dom.chkInject.checked;
-    sd.setPrefs({ injectionEnabled: injectEnabled }).catch(() => {});
+    // 只对本次会话生效，不写入配置：下次启动必然是关闭状态
+    const action = injectEnabled ? sd.injectEnable() : sd.injectDisable();
+    action.catch(() => {});
     if (state) updateStatus(state);
+  });
+
+  dom.btnReconnect.addEventListener('click', () => {
+    // 递增 captureNonce 会让两个视图都销毁旧流、重新建立捕获
+    const nonce = (state && state.captureNonce) || 0;
+    queuePatch({ captureNonce: nonce + 1 });
   });
 
   dom.btnToggleOutput.addEventListener('click', async () => {
@@ -799,12 +822,21 @@
         localZoom = clamp(prefs.mirrorLocalZoom, 0.2, 6);
         viewer.setLocalZoom(localZoom);
       }
-      injectEnabled = Boolean(prefs && prefs.injectionEnabled);
-      dom.chkInject.checked = injectEnabled;
+      // 事件注入永远是「本次会话手动开启」，不从配置恢复
+      injectEnabled = false;
+      dom.chkInject.checked = false;
 
       const initial = await sd.getState();
       applyState(initial);
       sd.onState(applyState);
+
+      // 大屏视口变化（全屏切换、分辨率变化）时重新等比布局
+      sd.onViewport((size) => {
+        if (size && size.width > 0 && size.height > 0) {
+          outputSize = { width: size.width, height: size.height };
+          layoutScreen();
+        }
+      });
 
       await refreshDocuments();
     } catch (err) {
@@ -814,6 +846,11 @@
 
   window.addEventListener('beforeunload', () => {
     sd.setPrefs({ mirrorLocalZoom: localZoom }).catch(() => {});
+    try {
+      viewer.destroy();
+    } catch {
+      // 忽略
+    }
   });
 
   init();

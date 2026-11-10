@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld('screenDeck', {
   patch: (partial) => ipcRenderer.invoke('state:patch', partial),
   onState,
   loadDocument: (id) => ipcRenderer.invoke('doc:load', id),
+  // 上报真实视口尺寸：映射窗按它布局，保证两边取景一致
+  reportViewport: (size) => ipcRenderer.invoke('output:viewport', size),
 });

@@ -75,9 +75,16 @@ function registerIpc({ wm, docState, sources, store, injector }) {
 
   ipcMain.handle('output:toggle', () => wm.toggleOutput());
   ipcMain.handle('output:size', () => wm.outputSize());
+  ipcMain.handle('output:viewport', (_event, size) => {
+    wm.setOutputViewport(size);
+    return true;
+  });
 
   // ── 事件注入（实验，默认关闭）──────────────────────────────
-  const injectionEnabled = () => store.data.prefs.injectionEnabled === true;
+  // 不写入配置：每次启动都必须是关闭状态，必须由用户当次手动开启。
+  let injectionArmed = false;
+
+  const injectionEnabled = () => injectionArmed === true;
 
   const clamp01 = (value) => {
     const n = Number(value);
@@ -96,6 +103,25 @@ function registerIpc({ wm, docState, sources, store, injector }) {
     available: Boolean(injector && injector.child && !injector.dead),
   }));
 
+  /** 显式开启：只对本次会话有效，不落盘。 */
+  ipcMain.handle('inject:enable', () => {
+    injectionArmed = true;
+    wm.log('[inject] 已被用户开启（仅本次会话）');
+    return { ok: true, enabled: true };
+  });
+
+  /** 紧急关闭：解绑注入并停掉注入器进程。Esc 快捷键会调用这里。 */
+  ipcMain.handle('inject:disable', () => {
+    injectionArmed = false;
+    try {
+      if (injector) injector.stop();
+    } catch {
+      // 忽略
+    }
+    wm.log('[inject] 已被用户关闭（紧急停止）');
+    return { ok: true, enabled: false };
+  });
+
   ipcMain.handle('inject:click', async (_event, payload) => {
     if (!injectionEnabled()) return { ok: false, reason: 'disabled' };
     const target = currentTarget();
@@ -106,7 +132,19 @@ function registerIpc({ wm, docState, sources, store, injector }) {
     if (!ready) return { ok: false, reason: 'injector-unavailable' };
 
     const result = await injector.click(target.hwnd, clamp01(payload && payload.nx), clamp01(payload && payload.ny));
-    if (!result.ok) wm.log('[inject] 点击失败：', result.reason);
+    // 留痕：出问题时能查到到底点到了哪个窗口、什么位置
+    wm.log(
+      '[inject] click hwnd =',
+      target.hwnd,
+      'target =',
+      target.source.title,
+      'nx =',
+      clamp01(payload && payload.nx).toFixed(3),
+      'ny =',
+      clamp01(payload && payload.ny).toFixed(3),
+      '=>',
+      result.ok ? 'ok' : result.reason
+    );
     return result;
   });
 
@@ -125,7 +163,14 @@ function registerIpc({ wm, docState, sources, store, injector }) {
       clamp01(payload && payload.ny),
       Number(payload && payload.delta) || 0
     );
-    if (!result.ok) wm.log('[inject] 滚轮失败：', result.reason);
+    wm.log(
+      '[inject] wheel hwnd =',
+      target.hwnd,
+      'target =',
+      target.source.title,
+      '=>',
+      result.ok ? 'ok' : result.reason
+    );
     return result;
   });
   ipcMain.handle('app:quit', () => {

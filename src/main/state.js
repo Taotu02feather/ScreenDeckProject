@@ -42,6 +42,8 @@ function createState() {
     scroll: 0,
     zoom: 1,
     mirrorZoom: 1,
+    // 捕获流重建计数器：变更时两个视图都会重新建立 capture（用于画面异常时重连）
+    captureNonce: 0,
     laser: { x: 0.5, y: 0.5, visible: false, at: 0 },
   };
 }
@@ -94,6 +96,10 @@ class DocState extends EventEmitter {
       s.mirrorZoom = clamp(finite(input.mirrorZoom, s.mirrorZoom), ZOOM_MIN, ZOOM_MAX);
     }
 
+    if (input.captureNonce !== undefined) {
+      s.captureNonce = Math.max(0, Math.trunc(finite(input.captureNonce, s.captureNonce)));
+    }
+
     if (input.laser && typeof input.laser === 'object') {
       const l = input.laser;
       s.laser = {
@@ -120,6 +126,7 @@ class DocState extends EventEmitter {
     // 缩放必须复位：否则上一份文档调大的倍数会带过来，新文档一打开就只看到一角
     s.zoom = 1;
     s.mirrorZoom = 1;
+    s.captureNonce += 1;
     s.laser = { x: 0.5, y: 0.5, visible: false, at: 0 };
     s.rev += 1;
     const snap = this.snapshot();

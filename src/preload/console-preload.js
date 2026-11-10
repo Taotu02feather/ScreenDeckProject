@@ -13,11 +13,18 @@ function onState(callback) {
   return () => ipcRenderer.removeListener('state:event', listener);
 }
 
+function onViewport(callback) {
+  const listener = (_event, size) => callback(size);
+  ipcRenderer.on('viewport:changed', listener);
+  return () => ipcRenderer.removeListener('viewport:changed', listener);
+}
+
 contextBridge.exposeInMainWorld('screenDeck', {
   // 共享状态
   getState: () => ipcRenderer.invoke('state:get'),
   patch: (partial) => ipcRenderer.invoke('state:patch', partial),
   onState,
+  onViewport,
 
   // 内部内容源
   loadDocument: (id) => ipcRenderer.invoke('doc:load', id),
@@ -45,6 +52,8 @@ contextBridge.exposeInMainWorld('screenDeck', {
   injectStatus: () => ipcRenderer.invoke('inject:status'),
   injectClick: (payload) => ipcRenderer.invoke('inject:click', payload),
   injectWheel: (payload) => ipcRenderer.invoke('inject:wheel', payload),
+  injectDisable: () => ipcRenderer.invoke('inject:disable'),
+  injectEnable: () => ipcRenderer.invoke('inject:enable'),
 
   quit: () => ipcRenderer.invoke('app:quit'),
 });
