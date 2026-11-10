@@ -21,6 +21,7 @@
     btnPrevPage: document.getElementById('btn-prev-page'),
     btnNextPage: document.getElementById('btn-next-page'),
     btnFit: document.getElementById('btn-fit'),
+    chkInject: document.getElementById('chk-inject'),
     mirrorTitle: document.getElementById('mirror-title'),
     mirrorStatus: document.getElementById('mirror-status'),
     docList: document.getElementById('doc-list'),
@@ -124,6 +125,7 @@
   let contentDrag = null;
   let panelDrag = null;
   let panelResize = null;
+  let injectEnabled = false;
 
   // ── 状态读写 ─────────────────────────────────────────────
 
@@ -199,7 +201,7 @@
     dom.statusSource.textContent = `内容源：${title}`;
     dom.mirrorTitle.textContent = hasSource ? source.title || '映射窗' : '映射窗';
     dom.mirrorStatus.textContent = source.kind === 'window'
-      ? `只读镜像 · 映射 ${Math.round(localZoom * 100)}%`
+      ? `${injectEnabled ? '注入开' : '只读镜像'} · 映射 ${Math.round(localZoom * 100)}%`
       : `映射 ${Math.round(localZoom * 100)}%`;
 
     if (source.kind === 'pdf') {
@@ -513,6 +515,28 @@
     }
   }
 
+  /** 外部窗口画面在映射窗里是 object-fit: contain，算出实际内容区域，再把指针位置归一化。 */
+  function videoPointFromEvent(event) {
+    const video = dom.mirrorViewer ? dom.mirrorViewer.querySelector('.sd-video') : null;
+    const rect = dom.mirrorScreen.getBoundingClientRect();
+    if (!video || !video.videoWidth || rect.width <= 0 || rect.height <= 0) return null;
+
+    const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
+    const contentWidth = video.videoWidth * scale;
+    const contentHeight = video.videoHeight * scale;
+    const offsetX = (rect.width - contentWidth) / 2;
+    const offsetY = (rect.height - contentHeight) / 2;
+
+    const nx = (event.clientX - rect.left - offsetX) / contentWidth;
+    const ny = (event.clientY - rect.top - offsetY) / contentHeight;
+    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
+    return { nx, ny };
+  }
+
+  function isExternalSource() {
+    return Boolean(state && state.source && state.source.kind === 'window');
+  }
+
   dom.mirrorScreen.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
     dom.mirrorScreen.setPointerCapture(event.pointerId);
@@ -568,6 +592,21 @@
     contentDrag = null;
     if (!wasClick) return;
 
+    // 外部窗口 + 注入开关打开：把这次点击转发给被投送的窗口
+    if (isExternalSource() && injectEnabled) {
+      const point = videoPointFromEvent(event);
+      if (point) {
+        sd.injectClick({ nx: point.nx, ny: point.ny })
+          .then((result) => {
+            if (result && !result.ok && result.reason !== 'disabled') {
+              dom.mirrorStatus.textContent = `注入失败：${result.reason}`;
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+    }
+
     const rect = dom.mirrorScreen.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     queuePatch({
@@ -591,6 +630,15 @@
       }
       savePrefsSoon();
       return;
+    }
+
+    // 外部窗口 + 注入开关：滚轮转发给被投送窗口
+    if (isExternalSource() && injectEnabled) {
+      const point = videoPointFromEvent(event);
+      if (point) {
+        sd.injectWheel({ nx: point.nx, ny: point.ny, delta: event.deltaY }).catch(() => {});
+        return;
+      }
     }
 
     const base = state ? state.scroll : 0;
@@ -681,6 +729,12 @@
     if (state) viewer.apply(state).catch(() => {});
   });
 
+  dom.chkInject.addEventListener('change', () => {
+    injectEnabled = dom.chkInject.checked;
+    sd.setPrefs({ injectionEnabled: injectEnabled }).catch(() => {});
+    if (state) updateStatus(state);
+  });
+
   dom.btnToggleOutput.addEventListener('click', async () => {
     try {
       const result = await sd.toggleOutput();
@@ -745,6 +799,8 @@
         localZoom = clamp(prefs.mirrorLocalZoom, 0.2, 6);
         viewer.setLocalZoom(localZoom);
       }
+      injectEnabled = Boolean(prefs && prefs.injectionEnabled);
+      dom.chkInject.checked = injectEnabled;
 
       const initial = await sd.getState();
       applyState(initial);

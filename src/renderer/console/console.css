@@ -278,6 +278,29 @@ button.wide {
   white-space: nowrap;
 }
 
+/* 事件注入开关 */
+.inject-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid #1e232c;
+  font-size: 12px;
+  color: #8a94a6;
+  cursor: pointer;
+  user-select: none;
+}
+
+.inject-toggle input {
+  accent-color: #4f8cff;
+  cursor: pointer;
+}
+
+.inject-toggle:hover {
+  color: #c3cede;
+}
+
 /* ── 舞台 ─────────────────────────────────────────────── */
 .stage {
   position: relative;

@@ -157,10 +157,18 @@ class SourceRegistry {
       JSON.stringify(sources.slice(0, 12).map((s) => s.name))
     );
 
+    // 精确排除自己的窗口：用 BrowserWindow.getMediaSourceId() 拿到的真实 source id，
+    // 不能用名字过滤 —— 用户自己的窗口标题里可能就含 "ScreenDeck"（例如 VS Code 打开本项目）。
+    const selfIds = new Set();
+    const selfNames = new Set(['ScreenDeck 控制台', 'ScreenDeck 输出', 'ScreenDeck 输出（单屏测试模式）']);
+    for (const win of [this.wm.console, this.wm.output]) {
+      if (!win || win.isDestroyed()) continue;
+      if (typeof win.getMediaSourceId === 'function') selfIds.add(win.getMediaSourceId());
+    }
+
     return sources
       .filter((s) => s.name && s.id)
-      // 不把自己（控制台/大屏）列进可投送窗口，避免自捕获
-      .filter((s) => !/ScreenDeck/i.test(s.name))
+      .filter((s) => !selfIds.has(s.id) && !selfNames.has(s.name))
       .map((s) => ({
         id: s.id,
         name: s.name,

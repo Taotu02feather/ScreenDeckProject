@@ -40,5 +40,11 @@ contextBridge.exposeInMainWorld('screenDeck', {
   // 输出窗口控制
   toggleOutput: () => ipcRenderer.invoke('output:toggle'),
   outputSize: () => ipcRenderer.invoke('output:size'),
+
+  // 事件注入（实验，外部窗口源时可用）
+  injectStatus: () => ipcRenderer.invoke('inject:status'),
+  injectClick: (payload) => ipcRenderer.invoke('inject:click', payload),
+  injectWheel: (payload) => ipcRenderer.invoke('inject:wheel', payload),
+
   quit: () => ipcRenderer.invoke('app:quit'),
 });

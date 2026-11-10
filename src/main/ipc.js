@@ -8,8 +8,9 @@
  */
 
 const { ipcMain, session, desktopCapturer, BrowserWindow, app } = require('electron');
+const { Injector } = require('./injector');
 
-function registerIpc({ wm, docState, sources, store }) {
+function registerIpc({ wm, docState, sources, store, injector }) {
   let laserTimer = null;
 
   const scheduleLaserHide = () => {
@@ -74,6 +75,59 @@ function registerIpc({ wm, docState, sources, store }) {
 
   ipcMain.handle('output:toggle', () => wm.toggleOutput());
   ipcMain.handle('output:size', () => wm.outputSize());
+
+  // ── 事件注入（实验，默认关闭）──────────────────────────────
+  const injectionEnabled = () => store.data.prefs.injectionEnabled === true;
+
+  const clamp01 = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
+  };
+
+  const currentTarget = () => {
+    const source = docState.snapshot().source;
+    if (source.type !== 'external' || !source.windowId) return null;
+    const hwnd = Injector.hwndFromSourceId(source.windowId);
+    return hwnd ? { hwnd, source } : null;
+  };
+
+  ipcMain.handle('inject:status', () => ({
+    enabled: injectionEnabled(),
+    available: Boolean(injector && injector.child && !injector.dead),
+  }));
+
+  ipcMain.handle('inject:click', async (_event, payload) => {
+    if (!injectionEnabled()) return { ok: false, reason: 'disabled' };
+    const target = currentTarget();
+    if (!target) return { ok: false, reason: 'not-external' };
+    if (!injector) return { ok: false, reason: 'no-injector' };
+
+    const ready = await injector.ensure();
+    if (!ready) return { ok: false, reason: 'injector-unavailable' };
+
+    const result = await injector.click(target.hwnd, clamp01(payload && payload.nx), clamp01(payload && payload.ny));
+    if (!result.ok) wm.log('[inject] 点击失败：', result.reason);
+    return result;
+  });
+
+  ipcMain.handle('inject:wheel', async (_event, payload) => {
+    if (!injectionEnabled()) return { ok: false, reason: 'disabled' };
+    const target = currentTarget();
+    if (!target) return { ok: false, reason: 'not-external' };
+    if (!injector) return { ok: false, reason: 'no-injector' };
+
+    const ready = await injector.ensure();
+    if (!ready) return { ok: false, reason: 'injector-unavailable' };
+
+    const result = await injector.wheel(
+      target.hwnd,
+      clamp01(payload && payload.nx),
+      clamp01(payload && payload.ny),
+      Number(payload && payload.delta) || 0
+    );
+    if (!result.ok) wm.log('[inject] 滚轮失败：', result.reason);
+    return result;
+  });
   ipcMain.handle('app:quit', () => {
     app.quit();
     return true;

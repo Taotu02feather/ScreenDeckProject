@@ -9,6 +9,7 @@ const { WindowManager } = require('./windows');
 const { DocState } = require('./state');
 const { Store } = require('./store');
 const { SourceRegistry } = require('./sources');
+const { Injector } = require('./injector');
 const { registerScheme, registerHandler } = require('./app-protocol');
 const registerIpc = require('./ipc');
 
@@ -84,6 +85,7 @@ function boot() {
   const store = new Store();
   const docState = new DocState();
   let wm = null;
+  let injectorRef = null;
 
   app.on('second-instance', () => {
     log('[event] second-instance');
@@ -107,8 +109,12 @@ function boot() {
     } catch (err) {
       log('[warn] 退出前落盘失败：', err.message);
     }
+    try {
+      if (injectorRef) injectorRef.stop();
+    } catch {
+      // 忽略
+    }
   });
-
   app.on('will-quit', () => log('[event] will-quit'));
 
   app.on('render-process-gone', (_event, _webContents, details) => {
@@ -143,7 +149,10 @@ function boot() {
         const sources = new SourceRegistry({ docState, wm, store });
         sources.hydrate(saved.documents);
 
-        registerIpc({ wm, docState, sources, store });
+        const injector = new Injector({ log, projectRoot: path.join(__dirname, '..', '..') });
+        injectorRef = injector;
+
+        registerIpc({ wm, docState, sources, store, injector });
         log('[ready] IPC 已注册');
 
         app.on('browser-window-created', (_event, win) => {
