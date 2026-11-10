@@ -37,18 +37,33 @@ npm test         # 逻辑冒烟测试（21 项，不需要 GUI）
 > 原因是 Chromium 在某些带特殊权限项的工作区目录里启动会断言失败（详见 NOTES.md）。
 > 若你的环境没有这个问题，可以用 `npm run start:direct` 直连 `node_modules` 里的运行时。
 
-单屏环境也能启动：检测不到第二块屏幕时，输出窗口退化为 960×540 的窗口，方便调试。
+### 一键启动（Windows）
+
+不想记命令就直接双击：
+
+| 文件 | 用途 |
+|---|---|
+| `ScreenDeck.cmd` | 正常启动 |
+| `ScreenDeck-Dev.cmd` | 调试启动（自动打开 DevTools） |
+
+脚本会自己 `cd` 到项目目录、检查 Node（PATH 里没有就用 `D:\Softwares\node\node.exe`）、
+调用 launcher；失败时窗口会停住并打印退出码和启动日志路径，方便贴反馈。
+
+想放到桌面：右键 `.cmd` → 发送到 → 桌面快捷方式。
+
+单屏环境也能启动：检测不到第二块屏幕时，输出窗口退化为 1024×576 的**带边框可拖动窗口**，方便单屏调试和录屏。
 
 ## 目录结构
 
 ```
 src/
 ├─ main/                 主进程
-│  ├─ main.js            应用生命周期、单实例锁
+│  ├─ main.js            应用生命周期、单实例锁、启动日志
 │  ├─ windows.js         控制台窗口 / 大屏输出窗口、显示器热插拔
 │  ├─ state.js           共享文档状态（唯一真相来源）+ 数值夹紧
 │  ├─ sources.js         PDF/Markdown/图片/外部窗口 的内容源注册表
 │  ├─ ipc.js             IPC 白名单、激光点自动消退、捕获源选择
+│  ├─ app-protocol.js    screendeck:// 自定义协议（worker/CSP 需要真实 origin）
 │  ├─ store.js           状态持久化（tmp + rename 原子写）
 │  ├─ paths.js           路径安全：realpath + 相对路径包含判断
 │  └─ safe-remove.js     删除安全：先扫 junction/reparse point
@@ -66,6 +81,8 @@ src/
 **为什么状态在主进程。** 两个渲染进程如果各存一份，就要处理冲突合并。放在主进程，写入只有一个入口，读取是广播，天然一致。
 
 **为什么按钮手势要换算成归一化坐标。** 大屏和映射窗尺寸完全不同，激光点必须用 0~1 的相对坐标，才能在两处落到同一个位置。
+
+**为什么不用 `file://` 加载页面。** `file://` 的 origin 是 `null`，Chromium 不允许从 `null` origin 构造 Worker，pdf.js 会直接抛 `SecurityError`（表现就是 PDF 打不开）。页面改由 `screendeck://` 自定义标准协议提供，origin 变成 `screendeck://local`，Worker、fetch、CSP `'self'` 全部正常；协议处理器对请求路径做 `realpath` 越界校验，只暴露仓库内的静态文件。
 
 ## 安全约束（代码里的硬规则）
 

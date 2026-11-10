@@ -110,13 +110,16 @@ class DocState extends EventEmitter {
     return snap;
   }
 
-  /** 换内容源时复位与“旧文档”绑定的状态，避免跨文档残留页码/滚动/激光点。 */
+  /** 换内容源时复位与“旧文档”绑定的状态，避免跨文档残留页码/滚动/激光点/缩放。 */
   switchSource(source) {
     const s = this.state;
     s.source = { ...blankSource(), ...pickSource(source) };
     s.page = 1;
     s.pageCount = 0;
     s.scroll = 0;
+    // 缩放必须复位：否则上一份文档调大的倍数会带过来，新文档一打开就只看到一角
+    s.zoom = 1;
+    s.mirrorZoom = 1;
     s.laser = { x: 0.5, y: 0.5, visible: false, at: 0 };
     s.rev += 1;
     const snap = this.snapshot();
@@ -133,6 +136,11 @@ class DocState extends EventEmitter {
     if (saved.scroll !== undefined) s.scroll = clamp(finite(saved.scroll, 0), 0, 1);
     if (saved.zoom !== undefined) s.zoom = clamp(finite(saved.zoom, 1), ZOOM_MIN, ZOOM_MAX);
     if (saved.mirrorZoom !== undefined) s.mirrorZoom = clamp(finite(saved.mirrorZoom, 1), ZOOM_MIN, ZOOM_MAX);
+
+    // 启动一律回到 100%：残留的大缩放会让文档一打开就只显示一角，是最容易误解成"渲染坏了"的情况
+    s.zoom = 1;
+    s.mirrorZoom = 1;
+    s.scroll = 0;
   }
 
   /** 只持久化“重启后还该存在”的字段，rev/laser 是瞬时量。 */

@@ -15,6 +15,12 @@
     mirror: document.getElementById('mirror'),
     mirrorHeader: document.getElementById('mirror-header'),
     mirrorBody: document.getElementById('mirror-body'),
+    mirrorScreen: document.getElementById('mirror-screen'),
+    mirrorViewer: document.getElementById('mirror-viewer'),
+    mirrorLaser: document.getElementById('mirror-laser'),
+    btnPrevPage: document.getElementById('btn-prev-page'),
+    btnNextPage: document.getElementById('btn-next-page'),
+    btnFit: document.getElementById('btn-fit'),
     mirrorTitle: document.getElementById('mirror-title'),
     mirrorStatus: document.getElementById('mirror-status'),
     docList: document.getElementById('doc-list'),
@@ -30,11 +36,83 @@
   };
 
   if (window.pdfjsLib) {
-    const buildBase = new URL('../../../node_modules/pdfjs-dist/build/', document.baseURI).href;
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.js', buildBase).href;
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${location.origin}/node_modules/pdfjs-dist/build/pdf.worker.min.js`;
   }
 
-  const viewer = new window.Viewer(dom.mirrorBody);
+  // 画面渲染在“与大屏等比”的容器里，而不是整个映射窗，保证两边取景一致。
+  // 注意：Viewer 会给自己的根节点加 .sd-viewer（position:absolute; inset:0），
+  // 所以必须挂到内层的 #mirror-viewer 上，不能挂到 #mirror-screen 本身，
+  // 否则会把容器的居中定位覆盖掉（曾导致只看到画面右下角）。
+  const viewer = new window.Viewer(dom.mirrorViewer, {
+    hint: '拖动上方 ⠿ 标题栏可移动，拖边框缩放；从左侧选择内容源',
+  });
+
+  // 大屏内容区尺寸（由主进程提供），用于保持映射画面比例
+  let outputSize = { width: 1280, height: 720 };
+
+  /**
+   * 把映射画面按大屏的宽高比放进映射窗，居中并留黑边。
+   * 这样"大屏上下拖到一半"和"映射窗里拖到一半"看到的是同一块内容，
+   * 激光点位置也就不会再错位。
+   */
+  function layoutScreen() {
+    if (!dom.mirrorScreen || !dom.mirrorBody) return;
+    const availWidth = dom.mirrorBody.clientWidth;
+    const availHeight = dom.mirrorBody.clientHeight;
+    if (availWidth < 2 || availHeight < 2) return;
+
+    const aspect = outputSize.width > 0 && outputSize.height > 0
+      ? outputSize.width / outputSize.height
+      : 16 / 9;
+
+    let width = availWidth;
+    let height = Math.round(width / aspect);
+    if (height > availHeight) {
+      height = availHeight;
+      width = Math.round(height * aspect);
+    }
+    dom.mirrorScreen.style.width = `${width}px`;
+    dom.mirrorScreen.style.height = `${height}px`;
+
+    console.log(
+      `[mirror] 布局 screen=${width}x${height} body=${availWidth}x${availHeight} aspect=${aspect.toFixed(3)} outputSize=${outputSize.width}x${outputSize.height}`
+    );
+
+    // 几何自检：曾经因为 .sd-viewer 的 inset:0 覆盖容器定位，导致只看到画面右下角。
+    // 这几行能让下次类似问题一眼定位。
+    const rectOf = (element) => {
+      if (!element) return 'null';
+      const box = element.getBoundingClientRect();
+      return `${Math.round(box.left)},${Math.round(box.top)} ${Math.round(box.width)}x${Math.round(box.height)}`;
+    };
+    console.log(
+      `[geom] body=${rectOf(dom.mirrorBody)} screen=${rectOf(dom.mirrorScreen)} viewer=${rectOf(dom.mirrorViewer)} canvas=${rectOf(
+        dom.mirrorViewer ? dom.mirrorViewer.querySelector('.sd-canvas') : null
+      )}`
+    );
+  }
+
+  async function refreshOutputSize() {
+    try {
+      const info = await sd.outputSize();
+      if (info && info.width > 0 && info.height > 0) {
+        outputSize = { width: info.width, height: info.height };
+        layoutScreen();
+      }
+    } catch {
+      // 拿不到就沿用默认 16:9，不影响使用
+    }
+  }
+
+  // 映射窗尺寸变化时重新等比布局
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => layoutScreen()).observe(dom.mirrorBody);
+  }
+
+  // 启动自检：这几行会进启动日志，用来确认脚本、pdf.js、marked 是否真的加载成功
+  console.log(
+    `[boot] console renderer 就绪 origin=${location.origin} pdfjs=${typeof window.pdfjsLib} marked=${typeof window.marked} api=${typeof sd}`
+  );
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -69,6 +147,23 @@
     viewer.apply(next).catch((err) => console.error('[console] 渲染失败', err));
     updateStatus(next);
     updateSelection(next);
+    paintMirrorLaser(next);
+  }
+
+  /**
+   * 映射窗里也画一个激光点。
+   * 激光点的定义位置是大屏，但映射窗不显示任何反馈会让人以为"单击没反应"。
+   */
+  function paintMirrorLaser(snapshot) {
+    if (!dom.mirrorLaser) return;
+    const laser = snapshot.laser || {};
+    if (!laser.visible) {
+      dom.mirrorLaser.classList.remove('on');
+      return;
+    }
+    dom.mirrorLaser.style.left = `${(laser.x * 100).toFixed(2)}%`;
+    dom.mirrorLaser.style.top = `${(laser.y * 100).toFixed(2)}%`;
+    dom.mirrorLaser.classList.add('on');
   }
 
   // 映射窗本地缩放要持久化；beforeunload 在强制退出时不一定触发，所以改动后延迟存一次
@@ -103,7 +198,9 @@
     dom.sourceSummary.textContent = title;
     dom.statusSource.textContent = `内容源：${title}`;
     dom.mirrorTitle.textContent = hasSource ? source.title || '映射窗' : '映射窗';
-    dom.mirrorStatus.textContent = `映射 ${Math.round(localZoom * 100)}%`;
+    dom.mirrorStatus.textContent = source.kind === 'window'
+      ? `只读镜像 · 映射 ${Math.round(localZoom * 100)}%`
+      : `映射 ${Math.round(localZoom * 100)}%`;
 
     if (source.kind === 'pdf') {
       const total = Math.max(1, viewer.getPageCount() || snapshot.pageCount || 1);
@@ -165,7 +262,20 @@
         title.textContent = doc.title;
         title.title = doc.path;
 
-        li.append(kind, title);
+        // 从列表移除（只移除记录，不删磁盘文件）
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'remove';
+        remove.textContent = '×';
+        remove.title = '从列表移除';
+        remove.addEventListener('click', (event) => {
+          event.stopPropagation();
+          sd.removeDocument(doc.id)
+            .then(() => refreshDocuments())
+            .catch(showError);
+        });
+
+        li.append(kind, title, remove);
         li.addEventListener('click', () => {
           sd.selectDocument(doc.id).then(applyState).catch(showError);
         });
@@ -346,11 +456,39 @@
   }
 
   window.addEventListener('resize', () => {
+    layoutScreen();
     if (dom.mirror.classList.contains('maximized')) return;
     applyRect(clampRect(currentRect()));
   });
 
   // ── 映射窗内容手势 ───────────────────────────────────────
+
+  /** 翻页节流：拖动/滚轮越过边界时，避免一帧翻十几页。 */
+  let lastPageSwitchAt = 0;
+
+  function switchPage(delta) {
+    if (!state || delta === 0) return false;
+    const source = state.source || {};
+    if (source.kind !== 'pdf') return false;
+
+    const total = Math.max(1, viewer.getPageCount() || state.pageCount || 1);
+    const next = clamp((state.page || 1) + delta, 1, total);
+    if (next === state.page) return false;
+
+    const now = Date.now();
+    if (now - lastPageSwitchAt < 250) return false;
+    lastPageSwitchAt = now;
+    queuePatch({ page: next, scroll: delta > 0 ? 0 : 1 });
+    return true;
+  }
+
+  /** 滚动越界时自动翻页，做出"连续滚动"的手感。 */
+  function scrollWithPageTransition(nextScroll) {
+    if (!state) return;
+    if (nextScroll > 1.001 && switchPage(1)) return;
+    if (nextScroll < -0.001 && switchPage(-1)) return;
+    queuePatch({ scroll: clamp(nextScroll, 0, 1) });
+  }
 
   function stepContent(delta) {
     if (!state || delta === 0) return;
@@ -375,9 +513,9 @@
     }
   }
 
-  dom.mirrorBody.addEventListener('pointerdown', (event) => {
+  dom.mirrorScreen.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
-    dom.mirrorBody.setPointerCapture(event.pointerId);
+    dom.mirrorScreen.setPointerCapture(event.pointerId);
     contentDrag = {
       startX: event.clientX,
       startY: event.clientY,
@@ -388,7 +526,7 @@
     };
   });
 
-  dom.mirrorBody.addEventListener('pointermove', (event) => {
+  dom.mirrorScreen.addEventListener('pointermove', (event) => {
     if (!contentDrag) return;
     const dx = event.clientX - contentDrag.startX;
     const dy = event.clientY - contentDrag.startY;
@@ -400,13 +538,22 @@
 
     if (contentDrag.axis === 'y') {
       const range = viewer.getScrollRange();
-      if (range <= 0) return;
-      queuePatch({ scroll: clamp(contentDrag.startScroll - dy / range, 0, 1) });
+      if (range <= 0) {
+        // 内容没有可滚动余量（例如页面正好铺满）时，纵向拖动直接当成翻页
+        const step = Math.trunc(-dy / 60);
+        if (step !== contentDrag.step) {
+          const delta = step - contentDrag.step;
+          contentDrag.step = step;
+          switchPage(delta > 0 ? 1 : -1);
+        }
+        return;
+      }
+      scrollWithPageTransition(contentDrag.startScroll - dy / range);
       return;
     }
 
     if (contentDrag.axis === 'x') {
-      const step = Math.trunc(dx / 80);
+      const step = Math.trunc(dx / 50);
       if (step !== contentDrag.step) {
         const delta = step - contentDrag.step;
         contentDrag.step = step;
@@ -415,13 +562,13 @@
     }
   });
 
-  dom.mirrorBody.addEventListener('pointerup', (event) => {
+  dom.mirrorScreen.addEventListener('pointerup', (event) => {
     if (!contentDrag) return;
     const wasClick = contentDrag.moved < 6;
     contentDrag = null;
     if (!wasClick) return;
 
-    const rect = dom.mirrorBody.getBoundingClientRect();
+    const rect = dom.mirrorScreen.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     queuePatch({
       laser: {
@@ -432,7 +579,7 @@
     });
   });
 
-  dom.mirrorBody.addEventListener('wheel', (event) => {
+  dom.mirrorScreen.addEventListener('wheel', (event) => {
     event.preventDefault();
 
     if (event.ctrlKey) {
@@ -447,7 +594,7 @@
     }
 
     const base = state ? state.scroll : 0;
-    queuePatch({ scroll: clamp(base + event.deltaY / 900, 0, 1) });
+    scrollWithPageTransition(base + event.deltaY / 900);
   }, { passive: false });
 
   // ── 快捷键 ───────────────────────────────────────────────
@@ -477,6 +624,15 @@
         break;
       case '0':
         queuePatch({ zoom: 1 });
+        break;
+      case 'f':
+      case 'F':
+        // 适配：缩放归 100%、回到页首，映射窗本地缩放也复位
+        localZoom = 1;
+        viewer.setLocalZoom(localZoom);
+        savePrefsSoon();
+        queuePatch({ zoom: 1, scroll: 0 });
+        if (state) viewer.apply(state).catch(() => {});
         break;
       case 'Escape':
         queuePatch({ laser: { visible: false } });
@@ -514,10 +670,23 @@
     refreshWindows();
   });
 
+  dom.btnPrevPage.addEventListener('click', () => stepContent(-1));
+  dom.btnNextPage.addEventListener('click', () => stepContent(1));
+
+  dom.btnFit.addEventListener('click', () => {
+    localZoom = 1;
+    viewer.setLocalZoom(localZoom);
+    savePrefsSoon();
+    queuePatch({ zoom: 1, scroll: 0 });
+    if (state) viewer.apply(state).catch(() => {});
+  });
+
   dom.btnToggleOutput.addEventListener('click', async () => {
     try {
       const result = await sd.toggleOutput();
       dom.btnToggleOutput.textContent = result && result.visible ? '隐藏大屏' : '显示大屏';
+      // 大屏窗口可能被重建，尺寸要重新取一次
+      await refreshOutputSize();
     } catch (err) {
       showError(err);
     }
@@ -566,6 +735,10 @@
       } else {
         applyRect(clampRect((layout && layout.mirror) || defaultRect()));
       }
+
+      // 先拿到大屏内容尺寸，再按比例摆放映射画面
+      await refreshOutputSize();
+      layoutScreen();
 
       const prefs = await sd.getPrefs();
       if (prefs && typeof prefs.mirrorLocalZoom === 'number') {

@@ -36,8 +36,9 @@
   }
 
   class Viewer {
-    constructor(root) {
+    constructor(root, options = {}) {
       this.root = root;
+      this.options = options;
       this.root.classList.add('sd-viewer');
       this.stage = el('div', 'sd-stage');
       this.root.appendChild(this.stage);
@@ -181,7 +182,7 @@
       const title = el('div', 'sd-placeholder-title');
       title.textContent = text;
       const hint = el('div', 'sd-placeholder-hint');
-      hint.textContent = '从左侧「文档」或「窗口」选择内容源';
+      hint.textContent = this.options.hint || '从左侧「文档」或「窗口」选择内容源';
       box.append(title, hint);
       this.stage.appendChild(box);
       this.contentHeight = 0;
@@ -194,14 +195,21 @@
       const bytes = toBytes(doc.data);
 
       // TODO: 明天重点排查 —— file:// 页面下 pdf.worker.min.js 能否加载。
-      // 若 worker 拉不起来，pdf.js 会抛 "Missing PDF" 或 worker 相关错误；
-      // 届时改为把 worker 拷进 src/renderer/vendor/ 并用相对路径加载。
+      // 若 worker 拉不起来，pdf.js 会抛 DOMException；届时检查 workerSrc 与协议 origin。
       let pdf;
+      const base = global.location ? global.location.origin : '';
       try {
-        pdf = await global.pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+        pdf = await global.pdfjsLib.getDocument({
+          data: bytes,
+          isEvalSupported: false,
+          // 中文等非嵌入式字体 / CMap 需要从本地加载，否则部分 PDF 会缺字
+          cMapUrl: `${base}/node_modules/pdfjs-dist/cmaps/`,
+          cMapPacked: true,
+          standardFontDataUrl: `${base}/node_modules/pdfjs-dist/standard_fonts/`,
+        }).promise;
       } catch (err) {
         const workerSrc = global.pdfjsLib.GlobalWorkerOptions.workerSrc || '(未设置)';
-        throw new Error(`PDF 加载失败：${err.message}；workerSrc=${workerSrc}`);
+        throw new Error(`PDF 加载失败：${err && err.message ? err.message : err}；workerSrc=${workerSrc}`);
       }
 
       if (token !== this.token) {
@@ -242,6 +250,7 @@
       if (renderToken !== this.renderToken || token !== this.token) return;
 
       const base = page.getViewport({ scale: 1 });
+      // 按宽度铺满：整页宽度充满视口，纵向可滚动。想整页看全就按 F 或点「适配」。
       const fitScale = width / base.width;
       const viewport = page.getViewport({ scale: fitScale * scaleFactor });
 
@@ -264,14 +273,28 @@
       if (renderToken !== this.renderToken || token !== this.token) return;
 
       this.contentHeight = Math.floor(viewport.height);
+
+      console.log(
+        `[viewer] pdf canvas=${Math.floor(viewport.width)}x${Math.floor(viewport.height)} stage=${width}x${height} scale=${scaleFactor.toFixed(3)} scroll=${(state.scroll || 0).toFixed(3)}`
+      );
+
       this.applyScrollOffset(state);
     }
 
     applyScrollOffset(state) {
       if (!this.canvasWrap) return;
-      const overflow = Math.max(0, this.contentHeight - this.stage.clientHeight);
-      const offset = clamp(state.scroll || 0, 0, 1) * overflow;
-      this.canvasWrap.style.transform = `translateY(${-offset.toFixed(1)}px)`;
+      const height = this.stage.clientHeight;
+      const overflow = Math.max(0, this.contentHeight - height);
+      const scroll = clamp(state.scroll || 0, 0, 1);
+
+      let offset;
+      if (overflow > 0) {
+        offset = -(scroll * overflow);
+      } else {
+        // 内容比视口矮时垂直居中，避免贴着顶部
+        offset = Math.max(0, (height - this.contentHeight) / 2);
+      }
+      this.canvasWrap.style.transform = `translateY(${offset.toFixed(1)}px)`;
     }
 
     // ── Markdown ───────────────────────────────────────────
@@ -334,10 +357,18 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
         throw new Error('当前环境不支持窗口捕获');
       }
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 30 },
-        audio: false,
-      });
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 30 },
+          audio: false,
+        });
+      } catch (err) {
+        const name = err && err.name ? err.name : 'Error';
+        const message = err && err.message ? err.message : String(err);
+        throw new Error(`窗口捕获失败（${name}）：${message}`);
+      }
       if (token !== this.token) {
         stream.getTracks().forEach((track) => track.stop());
         return;

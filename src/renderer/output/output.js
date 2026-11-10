@@ -13,10 +13,14 @@
   const fallback = document.getElementById('boot-fallback');
   if (fallback) fallback.remove();
 
-  // pdf.js 的 worker 走本地文件，避免联网
+  console.log(
+    `[boot] output renderer 就绪 origin=${location.origin} pdfjs=${typeof window.pdfjsLib} marked=${typeof window.marked}`
+  );
+
+  // pdf.js 的 worker 走同源的自定义协议（screendeck://local/...），
+  // 这样 Worker 构造不会被浏览器以 origin 为由拒绝（file:// 下会抛 SecurityError）
   if (window.pdfjsLib) {
-    const buildBase = new URL('../../../node_modules/pdfjs-dist/build/', document.baseURI).href;
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.js', buildBase).href;
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${location.origin}/node_modules/pdfjs-dist/build/pdf.worker.min.js`;
   }
 
   const viewer = new window.Viewer(viewerRoot);

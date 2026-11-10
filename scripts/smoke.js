@@ -71,7 +71,7 @@ async function main() {
     assert.strictEqual(snap.source.id, 'abc');
   });
 
-  await test('撤销/恢复持久化字段', () => {
+  await test('恢复持久化字段（缩放与滚动按设计复位）', () => {
     const state = new DocState();
     state.patch({ pageCount: 12, page: 5, zoom: 1.5, scroll: 0.25 });
     const saved = state.persistable();
@@ -79,8 +79,9 @@ async function main() {
     const restored = new DocState();
     restored.restore(saved);
     const snap = restored.snapshot();
-    assert.strictEqual(snap.page, 5);
-    assert.strictEqual(snap.zoom, 1.5);
+    assert.strictEqual(snap.page, 5, '页码应恢复');
+    assert.strictEqual(snap.zoom, 1, '启动时缩放必须复位到 100%');
+    assert.strictEqual(snap.scroll, 0, '启动时滚动必须归零');
   });
 
   await test('广播事件携带快照', () => {

@@ -8,9 +8,10 @@
 const path = require('node:path');
 const { BrowserWindow, screen } = require('electron');
 
+const { ORIGIN } = require('./app-protocol');
+
 const ROOT = path.join(__dirname, '..', '..');
 const PRELOAD_DIR = path.join(ROOT, 'src', 'preload');
-const RENDERER_DIR = path.join(ROOT, 'src', 'renderer');
 
 function debounce(fn, wait) {
   let timer = null;
@@ -55,14 +56,37 @@ class WindowManager {
    */
   wireDiagnostics(win, tag) {
     const log = this.log;
-    win.webContents.on('did-fail-load', (_event, code, description, url) => {
-      log(`[${tag}] did-fail-load code=${code} ${description} url=${url}`);
-    });
     win.webContents.on('preload-error', (_event, preloadPath, error) => {
       log(`[${tag}] preload-error ${preloadPath} :: ${error.message}`);
     });
     win.webContents.on('console-message', (_event, level, message, line, source) => {
-      if (level >= 2) log(`[${tag}:renderer] ${message} (${source}:${line})`);
+      // 开发模式下全部记录，方便看清脚本是否加载、CSP 是否拦了什么
+      const threshold = this.isDev ? 0 : 2;
+      if (level >= threshold) log(`[${tag}:renderer] ${message} (${source}:${line})`);
+    });
+    win.webContents.on('dom-ready', () => log(`[${tag}] dom-ready url=${win.webContents.getURL()}`));
+    win.webContents.on('did-finish-load', async () => {
+      log(`[${tag}] did-finish-load url=${win.webContents.getURL()}`);
+      try {
+        // 页面到底加载成了什么？这条诊断能把"空白页"变成可读的事实
+        const probe = await win.webContents.executeJavaScript(
+          `JSON.stringify({
+             title: document.title,
+             bodyLen: document.body ? document.body.innerHTML.length : -1,
+             headLen: document.head ? document.head.innerHTML.length : -1,
+             scripts: Array.from(document.scripts).map((s) => s.src),
+             styles: Array.from(document.querySelectorAll('link[rel=stylesheet]')).map((l) => l.href),
+             firstText: document.body ? (document.body.innerText || '').slice(0, 80) : ''
+           })`,
+          true
+        );
+        log(`[${tag}] 页面快照 ${probe}`);
+      } catch (err) {
+        log(`[${tag}] 读取页面内容失败：${err.message}`);
+      }
+    });
+    win.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      log(`[${tag}] did-fail-load code=${code} ${description} url=${url} mainFrame=${isMainFrame}`);
     });
     win.webContents.on('render-process-gone', (_event, details) => {
       log(`[${tag}] render-process-gone ${JSON.stringify(details)}`);
@@ -174,8 +198,8 @@ class WindowManager {
       }
     }, 2500);
 
-    this.console.loadFile(path.join(RENDERER_DIR, 'console', 'console.html')).catch((err) => {
-      this.log('[console] loadFile 失败：', err.message);
+    this.console.loadURL(`${ORIGIN}/src/renderer/console/console.html`).catch((err) => {
+      this.log('[console] loadURL 失败：', err.message);
     });
 
     if (this.isDev) this.console.webContents.openDevTools({ mode: 'detach' });
@@ -233,8 +257,8 @@ class WindowManager {
       }
     }, 3000);
 
-    this.output.loadFile(path.join(RENDERER_DIR, 'output', 'output.html')).catch((err) => {
-      this.log('[output] loadFile 失败：', err.message);
+    this.output.loadURL(`${ORIGIN}/src/renderer/output/output.html`).catch((err) => {
+      this.log('[output] loadURL 失败：', err.message);
     });
   }
 
@@ -272,8 +296,17 @@ class WindowManager {
     if (this.console && !this.console.isDestroyed()) this.console.webContents.send(channel, payload);
   }
 
+  /**
+   * 显隐大屏窗口。
+   * 如果输出窗口已被用户关掉（单屏测试模式下它有标题栏和关闭按钮），
+   * 这里负责重建，而不是让「显示大屏」变成一个永远无效的按钮。
+   */
   toggleOutput() {
-    if (!this.output || this.output.isDestroyed()) return { visible: false };
+    if (!this.output || this.output.isDestroyed()) {
+      this.log('[output] 窗口已被关闭，重新创建');
+      this.createOutput();
+      return { visible: true, recreated: true };
+    }
     if (this.output.isVisible()) {
       this.output.hide();
       return { visible: false };
@@ -282,8 +315,17 @@ class WindowManager {
     return { visible: true };
   }
 
-  displayInfo() {
-    const { displays, primary, secondary } = this.plan();
+  /** 大屏内容区尺寸，映射窗按这个宽高比布局，保证两边取景一致。 */
+  outputSize() {
+    if (this.output && !this.output.isDestroyed()) {
+      const bounds =
+        typeof this.output.getContentBounds === 'function' ? this.output.getContentBounds() : this.output.getBounds();
+      return { width: Math.round(bounds.width), height: Math.round(bounds.height) };
+    }
+    return { width: 1280, height: 720 };
+  }
+
+  displayInfo() {    const { displays, primary, secondary } = this.plan();
     return {
       primaryId: primary.id,
       secondaryId: secondary ? secondary.id : null,

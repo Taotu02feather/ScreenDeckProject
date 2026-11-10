@@ -73,6 +73,7 @@ function registerIpc({ wm, docState, sources, store }) {
   });
 
   ipcMain.handle('output:toggle', () => wm.toggleOutput());
+  ipcMain.handle('output:size', () => wm.outputSize());
   ipcMain.handle('app:quit', () => {
     app.quit();
     return true;
@@ -86,23 +87,33 @@ function registerIpc({ wm, docState, sources, store }) {
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     try {
       const wanted = wm.captureWindowId || docState.snapshot().source.windowId;
+      wm.log('[capture] 收到 getDisplayMedia 请求，目标 =', wanted || '(空)');
       if (wanted) {
         const source = await sources.resolveCaptureSource(wanted);
         if (source) {
+          wm.log('[capture] 命中窗口源：', source.id, source.name);
           callback({ video: source });
           return;
         }
+        wm.log('[capture] 目标窗口已不存在，回退到整屏');
       }
       const fallback = await desktopCapturer.getSources({
         types: ['screen'],
         thumbnailSize: { width: 1, height: 1 },
       });
+      wm.log('[capture] 回退整屏源数量 =', fallback.length);
       callback(fallback[0] ? { video: fallback[0] } : {});
     } catch (err) {
       console.error('[ipc] 解析捕获源失败：', err);
       callback({});
     }
   });
+
+  // getDisplayMedia 在某些版本里会走权限检查，显式放行屏幕/窗口捕获，其余保持默认
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === 'display-capture' || permission === 'media');
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'display-capture' || permission === 'media');
 }
 
 module.exports = registerIpc;

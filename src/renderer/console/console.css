@@ -320,7 +320,7 @@ button.wide {
 
 .mirror-header {
   flex: none;
-  height: 32px;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -328,6 +328,37 @@ button.wide {
   background: #1a202b;
   border-bottom: 1px solid #232c3a;
   cursor: move;
+}
+
+.mirror-grip {
+  flex: none;
+  color: #5c6b80;
+  font-size: 13px;
+  letter-spacing: 1px;
+  user-select: none;
+}
+
+/* 映射窗里的激光点（大屏上也有一个，位置相同） */
+.mirror-laser {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity 120ms ease, transform 120ms ease;
+  background: radial-gradient(circle, rgba(255, 64, 64, 0.95) 0%, rgba(255, 64, 64, 0.5) 44%, rgba(255, 64, 64, 0) 72%);
+  box-shadow: 0 0 18px 5px rgba(255, 48, 48, 0.45);
+}
+
+.mirror-laser.on {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .mirror-title {
@@ -350,12 +381,41 @@ button.wide {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #0a0c10;
+  background: #07080b;
   cursor: grab;
 }
 
 .mirror-body:active {
   cursor: grabbing;
+}
+
+/**
+ * 与大屏等比的内容容器。
+ * 映射窗里的手势坐标、激光点坐标都相对这个盒子，所以大屏和映射窗的画面取景完全一致，
+ * 不会出现"映射窗看着滚到一半、大屏却是另一个位置"。
+ */
+.mirror-screen {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: #000;
+  overflow: hidden;
+}
+
+.page-btn {
+  padding: 1px 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 5px;
+  background: #1b212b;
+  border: 1px solid #2a3342;
+  color: #aab6c8;
+}
+
+.page-btn:hover {
+  background: #253041;
+  color: #e8f0fb;
 }
 
 /* 缩放手柄 */

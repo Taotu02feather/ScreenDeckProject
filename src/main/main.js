@@ -9,7 +9,11 @@ const { WindowManager } = require('./windows');
 const { DocState } = require('./state');
 const { Store } = require('./store');
 const { SourceRegistry } = require('./sources');
+const { registerScheme, registerHandler } = require('./app-protocol');
 const registerIpc = require('./ipc');
+
+// 必须在 app ready 之前注册协议方案，否则 registerSchemesAsPrivileged 不生效
+registerScheme();
 
 const isDev = process.argv.includes('--dev');
 
@@ -122,6 +126,11 @@ function boot() {
     .then(async () => {
       try {
         log('[ready] app.whenReady 完成');
+
+        // 页面之后都通过 screendeck:// 加载（真实 origin，Worker/CSP 才能正常工作）
+        await registerHandler(path.join(__dirname, '..', '..'), log);
+        log('[ready] screendeck:// 协议已注册');
+
         store.init(app.getPath('userData'));
         log('[ready] userData =', app.getPath('userData'));
 

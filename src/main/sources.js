@@ -130,8 +130,15 @@ class SourceRegistry {
   }
 
   removeDocument(id) {
+    const removed = this.documents.get(id);
     this.documents.delete(id);
     this.store.setDocuments(this.list());
+
+    // 如果移除的正是当前在展示的文档，把内容源切回空，避免两边还挂着一个已失效的路径
+    const current = this.docState.snapshot().source;
+    if (removed && current && current.type === 'internal' && current.id === id) {
+      this.docState.switchSource({ type: 'none' });
+    }
     return { documents: this.list(), currentSource: this.docState.snapshot().source };
   }
 
@@ -142,6 +149,13 @@ class SourceRegistry {
       thumbnailSize: { width: 480, height: 270 },
       fetchWindowIcons: true,
     });
+
+    this.wm.log(
+      '[capture] 窗口源数量 =',
+      sources.length,
+      '名称 =',
+      JSON.stringify(sources.slice(0, 12).map((s) => s.name))
+    );
 
     return sources
       .filter((s) => s.name && s.id)

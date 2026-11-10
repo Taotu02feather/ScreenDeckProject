@@ -340,3 +340,52 @@ DSH 给工作区目录加了保护性权限项，Chromium 在该目录下启动�
 - 尚未定位是 `S-1-4-…` 这条权限项本身，还是它与继承标志的组合（`icacls` 无法为未知 SID 授权，T2 测试无效）。
 - 尚未验证接上外接屏后 `display-added` 的自动重定位是否如预期（明天办公室验证）。
 
+---
+
+# 附二：PDF 打不开的根因（2026-11-10 夜间修复）
+
+## 现象
+
+打开 PDF 后两个视图都不显示内容。启动日志里出现：
+
+```
+[console:renderer] [viewer] 加载内容失败： [object DOMException] (viewer.js:167)
+```
+
+## 根因
+
+页面之前用 `file://` 加载，**origin 是 `null`**。Chromium 不允许从 `null` origin 构造 Worker：
+
+```
+new Worker('file:///D:/.../node_modules/pdfjs-dist/build/pdf.worker.min.js')
+→ SecurityError（DOMException）
+```
+
+pdf.js 在 `getDocument()` 里就抛这个异常，所以任何 PDF 都打不开。顺带 CSP 的 `'self'` 在 `file://` 下也匹配不到来源，之前只能靠 `file:` 例外撑着。
+
+## 修复内容
+
+1. **新增 `src/main/app-protocol.js`**：注册标准协议 `screendeck://local`
+   - `registerSchemesAsPrivileged({ standard, secure, supportFetchAPI, corsEnabled, stream })`
+   - `protocol.handle` 内做 `realpath` + `isInside` 越界校验，内置 MIME 映射
+2. 两个窗口改为 `loadURL('screendeck://local/renderer/...')`
+3. HTML 里的资源路径改为绝对路径（`/node_modules/...`、`/renderer/...`）
+4. CSP 收紧为 `default-src 'self'`（只保留 `blob:` 给图片预览和 pdf.js）
+5. pdf.js 补 `cMapUrl` / `standardFontDataUrl`，解决中文 PDF 缺字
+6. **大屏窗口被关掉后 `toggleOutput()` 自动重建**（之前关掉就永久没了，「显示大屏」按钮失效）
+7. **映射窗内也绘制激光点**（之前只有大屏有，单击映射窗毫无反馈）
+8. 映射窗标题栏加 ⠿ 抓取符号、高度 32→36px，空状态提示改为「拖动上方 ⠿ 标题栏可移动」
+
+## 尚未验证（需要 GUI，agent 侧无法执行）
+
+- `screendeck://` 协议在 Electron 33 下的实际加载（静态检查已过，但没跑起来过）
+- PDF / Markdown 渲染与双视图同步
+- 关闭大屏窗口后，点「显示大屏」能否重建
+
+## 回滚方式
+
+改动集中在：`src/main/app-protocol.js`（新增）、`src/main/main.js`、`src/main/windows.js`、
+两个 HTML 的 CSP 与资源路径、`viewer.js` 的 worker/CMap 参数。
+要回到 0.1.0 的行为，只需把 `loadURL` 改回 `loadFile` 并恢复 HTML 的相对路径。
+
+

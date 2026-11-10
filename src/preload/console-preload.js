@@ -39,5 +39,6 @@ contextBridge.exposeInMainWorld('screenDeck', {
 
   // 输出窗口控制
   toggleOutput: () => ipcRenderer.invoke('output:toggle'),
+  outputSize: () => ipcRenderer.invoke('output:size'),
   quit: () => ipcRenderer.invoke('app:quit'),
 });

@@ -1,6 +1,6 @@
 {
   "name": "screendeck",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "ScreenDeck - 跨屏演示控制台：本地自由工作区 + 干净的大屏输出",
   "main": "src/main/main.js",

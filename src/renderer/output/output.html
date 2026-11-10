@@ -2,26 +2,27 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
+    <!-- 同 console.html：走 screendeck:// 协议，拥有真实 origin -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; media-src 'self' blob: file:; font-src 'self' data: file:; connect-src 'self' blob: file:; worker-src 'self' blob: file:;"
+      content="default-src 'self' screendeck:; script-src 'self' screendeck:; style-src 'self' 'unsafe-inline' screendeck:; img-src 'self' data: blob: screendeck:; media-src 'self' blob: screendeck:; font-src 'self' data: screendeck:; connect-src 'self' blob: screendeck:; worker-src 'self' blob: screendeck:;"
     />
     <title>ScreenDeck 输出</title>
-    <link rel="stylesheet" href="output.css" />
+    <link rel="stylesheet" href="/src/renderer/output/output.css" />
   </head>
   <body>
-    <!-- TODO: 明天重点排查 —— 同 console.html：若这块提示没消失，说明脚本被 CSP 挡住 -->
+    <!-- 兜底提示：脚本成功执行后会被 output.js 移除 -->
     <div id="boot-fallback" class="boot-fallback">
-      渲染脚本未加载（多半是 CSP 或文件路径问题）—— 请查看终端输出。
+      渲染脚本未加载 —— 请查看终端输出与 %TEMP%\screendeck-boot.log。
     </div>
 
     <div id="viewer" class="output-viewer"></div>
     <div id="laser" class="laser" aria-hidden="true"></div>
     <div id="hint" class="output-hint">ScreenDeck · 等待内容源</div>
 
-    <script src="../../../node_modules/pdfjs-dist/build/pdf.min.js"></script>
-    <script src="../../../node_modules/marked/marked.min.js"></script>
-    <script src="../common/viewer.js"></script>
-    <script src="output.js"></script>
+    <script src="/node_modules/pdfjs-dist/build/pdf.min.js"></script>
+    <script src="/node_modules/marked/marked.min.js"></script>
+    <script src="/src/renderer/common/viewer.js"></script>
+    <script src="/src/renderer/output/output.js"></script>
   </body>
 </html>

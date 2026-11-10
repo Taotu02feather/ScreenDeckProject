@@ -2,6 +2,29 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-11-10
+
+修复首次单屏试跑暴露的问题。核心是一条：**页面必须通过自定义协议加载，否则 PDF 永远打不开**。
+
+### 修复
+
+- **PDF 加载失败（DOMException）**：`file://` 页面的 origin 是 `null`，Chromium 拒绝从 `null` origin 构造 Worker，pdf.js 的 `new Worker(file:///.../pdf.worker.min.js)` 抛 SecurityError。
+  改为注册标准协议 `screendeck://`，页面拥有真实 origin，Worker / fetch / CSP 全部正常。
+  协议处理器做了路径越界校验（`realpath` + `isInside`），并内置正确的 MIME 映射。
+- **CSP 收紧**：去掉 `file:`、`data:` 等宽松例外，改为 `default-src 'self'`，只保留 `blob:`（图片预览与 pdf.js 需要）。
+- **中文 PDF 缺字**：补上 pdf.js 的 `cMapUrl` 与 `standardFontDataUrl`（指向本地 `node_modules/pdfjs-dist` 资源）。
+- **大屏窗口被关掉后无法恢复**：单屏测试模式的输出窗口带边框和关闭按钮，关掉后「显示大屏」按钮会失效。
+  现在 `toggleOutput()` 在窗口已销毁时负责重建。
+- **单击映射窗看不到反馈**：激光点原先只画在大屏上，映射窗没有任何提示，容易被当成"单击无效"。
+  现在映射窗内也绘制同一位置的点，两边同时出现。
+
+### 改进
+
+- 映射窗标题栏增加 ⠿ 抓取符号，高度 32→36px；空状态提示改为「拖动上方 ⠿ 标题栏可移动，拖边框缩放」。
+- 单屏模式输出窗口改为 1024×576 带边框可拖动窗口（原先 960×540 无边框且不可缩放，单屏时无法挪开）。
+- `Viewer` 支持传入自定义空状态提示文案。
+- 补 `scripts/launcher.js`、`scripts/preflight.js` 与一键启动脚本。
+
 ## [0.1.0] - 2026-11-10
 
 首个可用版本。模块 1~5 全部落地，架构以「主进程共享状态 + 双视图」为基石。
