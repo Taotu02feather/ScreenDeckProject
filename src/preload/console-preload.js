@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('screenDeck', {
   // 外部窗口源
   listWindows: () => ipcRenderer.invoke('windows:list'),
   selectWindow: (payload) => ipcRenderer.invoke('windows:select', payload),
+  captureInfo: () => ipcRenderer.invoke('capture:info'),
 
   // 显示器 / 布局 / 偏好
   listDisplays: () => ipcRenderer.invoke('display:list'),

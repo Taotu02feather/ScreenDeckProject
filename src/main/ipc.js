@@ -7,7 +7,7 @@
  * 不信任渲染层传来的任何路径或数值。
  */
 
-const { ipcMain, session, desktopCapturer, BrowserWindow, app } = require('electron');
+const { ipcMain, session, desktopCapturer, BrowserWindow, app, screen } = require('electron');
 const { Injector } = require('./injector');
 
 function registerIpc({ wm, docState, sources, store, injector }) {
@@ -55,6 +55,8 @@ function registerIpc({ wm, docState, sources, store, injector }) {
   ipcMain.handle('windows:list', () => sources.listWindows());
 
   ipcMain.handle('windows:select', (_event, payload) => {
+    // 切换目标时清掉旧的捕获方案，避免沿用上一次的裁剪参数
+    wm.capturePlan = null;
     const snapshot = sources.selectWindow(payload || {});
     store.setDocState(docState.persistable());
     return snapshot;
@@ -80,7 +82,75 @@ function registerIpc({ wm, docState, sources, store, injector }) {
     return true;
   });
 
-  // ── 事件注入（实验，默认关闭）──────────────────────────────
+  /**
+   * 外部窗口的捕获方案。
+   *
+   * Windows 的窗口捕获（WGC）在部分机器上会出现绿色伪影/色度错位，
+   * 而屏幕捕获走另一条管线，通常正常。所以这里计算「窗口在屏幕上的位置」，
+   * 让捕获整屏、渲染层再裁剪到窗口区域。
+   *
+   * 返回：{ mode: 'screen', displayId, crop:{x,y,w,h} } 或 { mode: 'window' }
+   */
+  ipcMain.handle('capture:info', async () => {
+    const source = docState.snapshot().source;
+    if (source.type !== 'external') return { mode: 'window' };
+
+    const hwnd = Injector.hwndFromSourceId(source.windowId);
+    if (!hwnd) {
+      wm.log('[capture] 无法从 source id 解析窗口句柄：', source.windowId);
+      return { mode: 'window' };
+    }
+    if (!injector) return { mode: 'window' };
+
+    const ready = await injector.ensure();
+    if (!ready) {
+      wm.log('[capture] 注入器不可用，无法获取窗口矩形，退回窗口捕获');
+      return { mode: 'window' };
+    }
+
+    const rect = await injector.clientRect(hwnd); // 物理像素、屏幕坐标
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      wm.log('[capture] 获取窗口矩形失败（hwnd =', hwnd, '），退回窗口捕获');
+      return { mode: 'window' };
+    }
+
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const displays = screen.getAllDisplays();
+    const display =
+      displays.find((d) => {
+        const b = d.bounds;
+        const sf = d.scaleFactor || 1;
+        return (
+          centerX >= b.x * sf && centerX < (b.x + b.width) * sf && centerY >= b.y * sf && centerY < (b.y + b.height) * sf
+        );
+      }) || screen.getPrimaryDisplay();
+
+    // 目标窗口在副屏（也就是我们自己的大屏）上时，屏幕捕获会把我们自己也拍进去，
+    // 造成递归画面，这里退回窗口捕获。
+    const plan = wm.plan();
+    if (plan.secondary && display.id === plan.secondary.id) {
+      wm.log('[capture] 目标窗口位于副屏，退回窗口捕获以避免自捕获');
+      wm.capturePlan = { mode: 'window' };
+      return { mode: 'window' };
+    }
+
+    const sf = display.scaleFactor || 1;
+    const displayWidth = display.bounds.width * sf;
+    const displayHeight = display.bounds.height * sf;
+
+    const crop = {
+      x: (rect.left - display.bounds.x * sf) / displayWidth,
+      y: (rect.top - display.bounds.y * sf) / displayHeight,
+      w: rect.width / displayWidth,
+      h: rect.height / displayHeight,
+    };
+
+    wm.capturePlan = { mode: 'screen', displayId: display.id };
+    wm.log('[capture] 使用屏幕捕获 + 裁剪', JSON.stringify(crop), 'displayId =', display.id);
+    return { mode: 'screen', displayId: display.id, crop };
+  });
   // 不写入配置：每次启动都必须是关闭状态，必须由用户当次手动开启。
   let injectionArmed = false;
 
@@ -185,6 +255,19 @@ function registerIpc({ wm, docState, sources, store, injector }) {
    */
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     try {
+      const plan = wm.capturePlan;
+
+      // 方案 A：屏幕捕获 + 渲染层裁剪（规避窗口捕获的绿色伪影）
+      if (plan && plan.mode === 'screen') {
+        const screens = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
+        const match = screens.find((s) => String(s.display_id) === String(plan.displayId)) || screens[0];
+        wm.log('[capture] 屏幕捕获命中 =', match ? `${match.id} (${match.name})` : '(无)');
+        if (match) {
+          callback({ video: match });
+          return;
+        }
+      }
+
       const wanted = wm.captureWindowId || docState.snapshot().source.windowId;
       wm.log('[capture] 收到 getDisplayMedia 请求，目标 =', wanted || '(空)');
       if (wanted) {

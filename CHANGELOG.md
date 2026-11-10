@@ -34,6 +34,28 @@
 - 外部窗口的点击坐标改用视频元素自身的 `getBoundingClientRect()`（含 transform），
   并取消映射窗本地缩放对视频的叠加，避免缩放后点击位置整体偏移。
 
+### 同日后续修复
+
+- **外部窗口捕获改为「屏幕捕获 + 按窗口矩形裁剪」**：`capture:info` 用 `GetClientRect`/`ClientToScreen`
+  取窗口物理矩形，换算成所在显示器的归一化裁剪框，捕获整屏后在渲染层裁剪，
+  绕开 Windows Graphics Capture 在部分机器上的绿色伪影。
+  目标窗口若位于副屏（我们的输出屏）则自动退回窗口捕获，避免自捕获。
+- 修正捕获顺序错误：必须先取捕获方案再调用 `getDisplayMedia`，否则永远拿到窗口流。
+- 强制视频解码走软件路径（`disable-accelerated-video-decode` / `disable-accelerated-video-encode` /
+  `disable-gpu-memory-buffer-video-frames`），`SCREENDECK_GPU_VIDEO=1` 可恢复硬件解码。
+- 事件注入改为**仅本次会话有效**，不再写入配置；`Esc` 为紧急停止；每次注入记录
+  `hwnd`、目标窗口标题、归一化坐标与结果，便于事后排查。
+- 输出窗口上报真实视口尺寸（`innerWidth`/`innerHeight`），映射窗据此等比布局，
+  修正「大屏画面偏上一点点」的误差。
+- 退出时主动销毁两个窗口，提前释放捕获流与 GPU 资源。
+- 拖动阻尼 0.6、滚轮步长 1500，改善 PDF 拖动过快的手感。
+
+### 已知问题
+
+- 在启用 HDR 的环境下，应用窗口可能出现整体偏绿（PDF/Markdown 路径也会）。
+  目前已排除 GPU 合成（`--disable-gpu` 无效），怀疑与 HDR 色彩映射或显示器色彩空间有关，
+  待用「关闭 HDR」对照确认。这属于环境层问题，代码侧暂无定论。
+
 ## [0.1.1] - 2026-11-10
 
 修复首次单屏试跑暴露的问题。核心是一条：**页面必须通过自定义协议加载，否则 PDF 永远打不开**。

@@ -63,6 +63,7 @@
       this.imageUrl = null;
       this.videoEl = null;
       this.stream = null;
+      this.crop = null;
 
       this.showPlaceholder('尚未选择内容源');
       this.pending = null;
@@ -359,6 +360,23 @@
         throw new Error('当前环境不支持窗口捕获');
       }
 
+      // 必须先取捕获方案，再发起 getDisplayMedia：
+      // 主进程的 setDisplayMediaRequestHandler 依赖这份方案来决定给窗口还是给整屏。
+      // 顺序反了就会永远拿到窗口流（正是绿色伪影的来源）。
+      this.crop = null;
+      try {
+        const info = global.screenDeck.captureInfo ? await global.screenDeck.captureInfo() : null;
+        if (info && info.mode === 'screen' && info.crop) {
+          this.crop = info.crop;
+          console.log('[viewer] 捕获方案 = screen + crop', JSON.stringify(this.crop));
+        } else {
+          console.log('[viewer] 捕获方案 = window');
+        }
+      } catch (err) {
+        this.crop = null;
+        console.warn('[viewer] 读取捕获方案失败，退回窗口捕获：', err && err.message);
+      }
+
       let stream;
       try {
         stream = await navigator.mediaDevices.getDisplayMedia({
@@ -378,6 +396,7 @@
       this.stream = stream;
       this.kind = 'window';
       this.stage.replaceChildren();
+
       this.videoEl = document.createElement('video');
       this.videoEl.className = 'sd-video';
       this.videoEl.muted = true;
@@ -387,6 +406,7 @@
       this.stage.appendChild(this.videoEl);
       this.videoEl.play().catch(() => {});
       this.contentHeight = 0;
+      this.applyCrop();
 
       const track = stream.getVideoTracks()[0];
       if (track) {
@@ -399,10 +419,47 @@
 
     paintStream(state) {
       if (!this.videoEl) return;
+      this.applyCrop();
       // 外部窗口只跟随共享缩放，不叠加映射窗的本地缩放：
       // 否则映射窗和实时大屏的取景会不一致，点击换算也会错位。
       const zoom = clamp(state.zoom || 1, ZOOM_MIN, ZOOM_MAX);
       this.videoEl.style.transform = `scale(${zoom.toFixed(3)})`;
+    }
+
+    /**
+     * 屏幕捕获模式：视频是整屏画面，用宽高 + 偏移把它裁剪成"只显示窗口"，
+     * 效果等同于窗口捕获，但绕开了 WGC 在这台机器上的绿色伪影。
+     */
+    applyCrop() {
+      if (!this.videoEl) return;
+      const stageWidth = this.stage.clientWidth;
+      const stageHeight = this.stage.clientHeight;
+
+      if (!this.crop || stageWidth < 2 || stageHeight < 2) {
+        this.videoEl.style.position = '';
+        this.videoEl.style.left = '';
+        this.videoEl.style.top = '';
+        this.videoEl.style.width = '100%';
+        this.videoEl.style.height = '100%';
+        this.videoEl.style.objectFit = 'contain';
+        return;
+      }
+
+      const { x, y, w, h } = this.crop;
+      if (w <= 0 || h <= 0) return;
+
+      const width = stageWidth / w;
+      const height = stageHeight / h;
+      this.videoEl.style.position = 'absolute';
+      this.videoEl.style.width = `${width}px`;
+      this.videoEl.style.height = `${height}px`;
+      this.videoEl.style.left = `${-x * width}px`;
+      this.videoEl.style.top = `${-y * height}px`;
+      this.videoEl.style.objectFit = 'fill';
+    }
+
+    getCrop() {
+      return this.crop || null;
     }
 
     // ── 分发 ───────────────────────────────────────────────
@@ -436,6 +493,7 @@
       this.canvasWrap = null;
       this.mdInner = null;
       this.imgEl = null;
+      this.crop = null;
       this.renderToken += 1;
     }
   }

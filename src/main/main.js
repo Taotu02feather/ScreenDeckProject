@@ -18,8 +18,15 @@ registerScheme();
 
 const isDev = process.argv.includes('--dev');
 
-// 默认保留硬件加速：视频（窗口捕获流）在软件路径下会渲染成整块绿色。
-// 只有在排查 GPU 相关问题时才用 SCREENDECK_NO_GPU=1 关闭。
+// 视频（窗口/屏幕捕获流）在这台机器上会渲染成绿色 —— 典型是硬件加速视频解码故障：
+// PDF 走 canvas 正常，唯独 <video> 发绿。
+// 强制视频解码与 GPU 内存缓冲走软件路径；导出 SCREENDECK_GPU_VIDEO=1 可恢复。
+if (process.env.SCREENDECK_GPU_VIDEO !== '1') {
+  app.commandLine.appendSwitch('disable-accelerated-video-decode');
+  app.commandLine.appendSwitch('disable-accelerated-video-encode');
+  app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames');
+}
+
 if (process.env.SCREENDECK_NO_GPU === '1') {
   app.disableHardwareAcceleration();
 }

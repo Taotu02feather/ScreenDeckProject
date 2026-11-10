@@ -48,6 +48,8 @@ class WindowManager {
     /** 当前选中的外部窗口捕获源 id（desktopCapturer source id） */
     this.captureWindowId = null;
     this.outputViewport = null;
+    /** 外部窗口的捕获方案：{ mode: 'window' } 或 { mode: 'screen', displayId } */
+    this.capturePlan = null;
     this._onStateChanged = (snapshot) => this.broadcast('state:event', snapshot);
   }
 

@@ -518,6 +518,18 @@
 
   /** 外部窗口画面在映射窗里是 object-fit: contain，算出实际内容区域，再把指针位置归一化。 */
   function videoPointFromEvent(event) {
+    const screenRect = dom.mirrorScreen.getBoundingClientRect();
+    if (screenRect.width <= 0 || screenRect.height <= 0) return null;
+
+    // 屏幕捕获 + 裁剪模式：画面已被裁剪成窗口区域并填满容器，
+    // 归一化坐标直接按容器算，不再考虑视频的留白。
+    if (viewer.getCrop && viewer.getCrop()) {
+      const nx = (event.clientX - screenRect.left) / screenRect.width;
+      const ny = (event.clientY - screenRect.top) / screenRect.height;
+      if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
+      return { nx, ny };
+    }
+
     const video = dom.mirrorViewer ? dom.mirrorViewer.querySelector('.sd-video') : null;
     if (!video || !video.videoWidth || !video.videoHeight) return null;
 
